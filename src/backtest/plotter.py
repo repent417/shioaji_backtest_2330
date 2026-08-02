@@ -1,6 +1,6 @@
 """
 Matplotlib Backtest Visualizer
-動態根據策略類型繪製 K 線、均線/布林通道/RSI/MACD/KD 指標線與權益資產走勢圖
+繪製真實台股 K 線圖 (紅漲綠跌 Candlesticks)、均線 / 布林通道 / RSI / MACD / KD 指標線與權益資產走勢圖
 """
 import os
 import matplotlib.pyplot as plt
@@ -13,6 +13,31 @@ plt.rcParams["font.sans-serif"] = ["Microsoft JhengHei", "SimHei", "Arial"]
 plt.rcParams["axes.unicode_minus"] = False
 
 class BacktestPlotter:
+    @staticmethod
+    def _draw_candlesticks(ax, df: pd.DataFrame, width: float = 0.6):
+        """在 Matplotlib ax 上繪製紅漲綠跌之真實 K 線 (Candlesticks)"""
+        # 計算價格漲跌顏色 (台股慣例：紅漲綠跌)
+        up_df = df[df["close"] >= df["open"]]
+        down_df = df[df["close"] < df["open"]]
+
+        # 1. 上漲 K 棒 (紅色)
+        if not up_df.empty:
+            # 影線 (High to Low)
+            ax.vlines(up_df["ts"], up_df["low"], up_df["high"], color="red", linewidth=1.0, zorder=2)
+            # 實體 K 棒 (Open to Close)
+            heights = np.maximum(abs(up_df["close"] - up_df["open"]), 0.5)
+            bottoms = np.minimum(up_df["open"], up_df["close"])
+            ax.bar(up_df["ts"], heights, bottom=bottoms, width=width, color="red", edgecolor="red", zorder=3)
+
+        # 2. 下跌 K 棒 (綠色)
+        if not down_df.empty:
+            # 影線 (High to Low)
+            ax.vlines(down_df["ts"], down_df["low"], down_df["high"], color="green", linewidth=1.0, zorder=2)
+            # 實體 K 棒 (Open to Close)
+            heights = np.maximum(abs(down_df["close"] - down_df["open"]), 0.5)
+            bottoms = np.minimum(down_df["open"], down_df["close"])
+            ax.bar(down_df["ts"], heights, bottom=bottoms, width=width, color="green", edgecolor="green", zorder=3)
+
     @staticmethod
     def create_figure(result: Dict[str, Any], stock_code: str = "2330") -> plt.Figure:
         portfolio = result["portfolio"]
@@ -29,30 +54,34 @@ class BacktestPlotter:
 
         if has_sub_indicator:
             fig, (ax1, ax_ind, ax_eq) = plt.subplots(
-                3, 1, figsize=(10, 8), sharex=True, 
-                gridspec_kw={"height_ratios": [2.2, 1.2, 1.2]}
+                3, 1, figsize=(10, 8.5), sharex=True, 
+                gridspec_kw={"height_ratios": [2.4, 1.2, 1.2]}
             )
         else:
             fig, (ax1, ax_eq) = plt.subplots(
-                2, 1, figsize=(10, 7), sharex=True, 
+                2, 1, figsize=(10, 7.5), sharex=True, 
                 gridspec_kw={"height_ratios": [2.5, 1.2]}
             )
             ax_ind = None
 
-        # 1. 主圖：收盤價 + 均線 / 布林通道 + 買賣訊號標記
-        ax1.plot(portfolio["ts"], portfolio["close"], label=f"[{stock_code}] 收盤價", color="#1f77b4", linewidth=1.5)
+        # 1. 主圖：繪製真實 K 線圖 (紅漲綠跌)
+        BacktestPlotter._draw_candlesticks(ax1, portfolio, width=0.6)
+
+        # 增加圖例代理 (Proxy Legends for Candlesticks)
+        ax1.plot([], [], color="red", label="紅棒 (漲)", linewidth=3)
+        ax1.plot([], [], color="green", label="綠棒 (跌)", linewidth=3)
 
         # 繪製均線 (SMA)
         if "sma_short" in portfolio.columns and "sma_long" in portfolio.columns:
-            ax1.plot(portfolio["ts"], portfolio["sma_short"], label="快線 (Short MA)", color="#ff7f0e", linestyle="--", linewidth=1.2)
-            ax1.plot(portfolio["ts"], portfolio["sma_long"], label="慢線 (Long MA)", color="#9467bd", linestyle="--", linewidth=1.2)
+            ax1.plot(portfolio["ts"], portfolio["sma_short"], label="快線 (Short MA)", color="#ff7f0e", linestyle="--", linewidth=1.3, zorder=4)
+            ax1.plot(portfolio["ts"], portfolio["sma_long"], label="慢線 (Long MA)", color="#9467bd", linestyle="--", linewidth=1.3, zorder=4)
         elif "sma" in portfolio.columns:
-            ax1.plot(portfolio["ts"], portfolio["sma"], label="中軌 (SMA)", color="#ff7f0e", linestyle="--", linewidth=1.2)
+            ax1.plot(portfolio["ts"], portfolio["sma"], label="中軌 (SMA)", color="#ff7f0e", linestyle="--", linewidth=1.3, zorder=4)
 
         # 繪製布林通道 (Bollinger Bands)
         if "upper_band" in portfolio.columns and "lower_band" in portfolio.columns:
-            ax1.plot(portfolio["ts"], portfolio["upper_band"], label="布林上軌", color="#2ca02c", linestyle=":", linewidth=1.2)
-            ax1.plot(portfolio["ts"], portfolio["lower_band"], label="布林下軌", color="#d62728", linestyle=":", linewidth=1.2)
+            ax1.plot(portfolio["ts"], portfolio["upper_band"], label="布林上軌", color="#2ca02c", linestyle=":", linewidth=1.2, zorder=4)
+            ax1.plot(portfolio["ts"], portfolio["lower_band"], label="布林下軌", color="#d62728", linestyle=":", linewidth=1.2, zorder=4)
             ax1.fill_between(portfolio["ts"], portfolio["lower_band"], portfolio["upper_band"], color="#2ca02c", alpha=0.1, label="布林通道區域")
 
         # 標記買賣點 (Buy/Sell Arrow Signals)
@@ -61,11 +90,11 @@ class BacktestPlotter:
             sell_trades = trades[trades["action"].str.contains("SELL")]
 
             if not buy_trades.empty:
-                ax1.scatter(buy_trades["date"], buy_trades["price"], marker="^", color="red", s=90, label="買進 (BUY)", zorder=5)
+                ax1.scatter(buy_trades["date"], buy_trades["price"], marker="^", color="darkred", s=110, label="買進 (BUY)", zorder=6)
             if not sell_trades.empty:
-                ax1.scatter(sell_trades["date"], sell_trades["price"], marker="v", color="green", s=90, label="賣出 (SELL)", zorder=5)
+                ax1.scatter(sell_trades["date"], sell_trades["price"], marker="v", color="darkgreen", s=110, label="賣出 (SELL)", zorder=6)
 
-        ax1.set_title(f"[{stock_code}] 歷史股價與技術指標 - {strategy_name}", fontsize=12, fontweight="bold")
+        ax1.set_title(f"[{stock_code}] 歷史日 K 線 (紅漲綠跌) 與指標 - {strategy_name}", fontsize=12, fontweight="bold")
         ax1.set_ylabel("股價 (TWD)", fontsize=10)
         ax1.grid(True, linestyle="--", alpha=0.5)
         ax1.legend(loc="upper left", fontsize=8)

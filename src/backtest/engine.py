@@ -137,7 +137,10 @@ class BacktestEngine:
             portfolio_records.append({
                 "ts": date,
                 "open": open_price,
+                "high": row["high"] if "high" in row else open_price,
+                "low": row["low"] if "low" in row else open_price,
                 "close": close_price,
+                "volume": row.get("volume", 0),
                 "cash": cash,
                 "position_shares": position_shares,
                 "stock_value": position_shares * close_price,
