@@ -1,0 +1,158 @@
+"""
+Taiwan Stock Backtest Engine with Risk Controls (Stop-Loss & Take-Profit)
+考慮台股交易成本與動態停損停利的專業回測引擎
+"""
+import pandas as pd
+import numpy as np
+from typing import Dict, Any, List, Optional
+from .strategy import BaseStrategy
+
+class BacktestEngine:
+    def __init__(
+        self,
+        initial_capital: float = 3_000_000.0,
+        commission_rate: float = 0.001425,
+        discount: float = 0.6,          # 手續費 6 折
+        min_commission: float = 20.0,
+        tax_rate: float = 0.003,        # 賣出證交稅 0.3%
+        shares_per_lot: int = 1000,
+        stop_loss_pct: Optional[float] = None,   # 停損百分比 (例如 0.05 代表 -5%)
+        take_profit_pct: Optional[float] = None  # 停利百分比 (例如 0.15 代表 +15%)
+    ):
+        self.initial_capital = initial_capital
+        self.commission_rate = commission_rate
+        self.discount = discount
+        self.min_commission = min_commission
+        self.tax_rate = tax_rate
+        self.shares_per_lot = shares_per_lot
+        self.stop_loss_pct = stop_loss_pct
+        self.take_profit_pct = take_profit_pct
+
+    def run(self, df: pd.DataFrame, strategy: BaseStrategy) -> Dict[str, Any]:
+        data = strategy.generate_signals(df)
+        
+        cash = self.initial_capital
+        position_shares = 0
+        entry_price = 0.0
+        portfolio_records = []
+        trade_logs = []
+        force_exit = False
+
+        for i, row in data.iterrows():
+            date = row["ts"]
+            close_price = row["close"]
+            open_price = row["open"]
+            target_signal = row["position"]
+
+            # 若上一日觸發停損停利風控，強制於今日開盤價平倉
+            if force_exit and position_shares > 0:
+                sell_shares = position_shares
+                sell_val = sell_shares * open_price
+                comm = max(self.min_commission, sell_val * self.commission_rate * self.discount)
+                tax = sell_val * self.tax_rate
+                net_revenue = sell_val - comm - tax
+
+                cash += net_revenue
+                trade_logs.append({
+                    "date": date,
+                    "action": "SELL (RISK)",
+                    "price": open_price,
+                    "shares": sell_shares,
+                    "amount": sell_val,
+                    "fee": comm,
+                    "tax": tax,
+                    "reason": exit_reason
+                })
+                position_shares = 0
+                entry_price = 0.0
+                force_exit = False
+
+            current_target_shares = target_signal * self.shares_per_lot
+            share_diff = current_target_shares - position_shares
+
+            if share_diff > 0 and position_shares == 0:
+                # 買進 (Buy)
+                desired_shares = share_diff
+                raw_buy_cost = desired_shares * open_price
+                raw_comm = max(self.min_commission, raw_buy_cost * self.commission_rate * self.discount)
+                
+                if cash < (raw_buy_cost + raw_comm):
+                    affordable_shares = int((cash - self.min_commission) / (open_price * (1 + self.commission_rate * self.discount)))
+                    actual_shares = max(0, (affordable_shares // 10) * 10)
+                else:
+                    actual_shares = desired_shares
+
+                if actual_shares > 0:
+                    buy_cost = actual_shares * open_price
+                    comm = max(self.min_commission, buy_cost * self.commission_rate * self.discount)
+                    total_spend = buy_cost + comm
+
+                    cash -= total_spend
+                    position_shares += actual_shares
+                    entry_price = open_price # 紀錄進場均價
+                    trade_logs.append({
+                        "date": date,
+                        "action": "BUY",
+                        "price": open_price,
+                        "shares": actual_shares,
+                        "amount": buy_cost,
+                        "fee": comm,
+                        "tax": 0.0,
+                        "reason": "SIGNAL"
+                    })
+            elif share_diff < 0 and position_shares > 0:
+                # 策略訊號賣出 (Sell)
+                sell_shares = position_shares
+                sell_val = sell_shares * open_price
+                comm = max(self.min_commission, sell_val * self.commission_rate * self.discount)
+                tax = sell_val * self.tax_rate
+                net_revenue = sell_val - comm - tax
+
+                cash += net_revenue
+                position_shares = 0
+                entry_price = 0.0
+                trade_logs.append({
+                    "date": date,
+                    "action": "SELL",
+                    "price": open_price,
+                    "shares": sell_shares,
+                    "amount": sell_val,
+                    "fee": comm,
+                    "tax": tax,
+                    "reason": "SIGNAL"
+                })
+
+            # 盤後檢視是否觸發停損停利 (提供下一個交易日開盤離場)
+            if position_shares > 0 and entry_price > 0:
+                current_pnl_pct = (close_price - entry_price) / entry_price
+                if self.stop_loss_pct and current_pnl_pct <= -abs(self.stop_loss_pct):
+                    force_exit = True
+                    exit_reason = f"STOP_LOSS ({current_pnl_pct*100:.1f}%)"
+                elif self.take_profit_pct and current_pnl_pct >= abs(self.take_profit_pct):
+                    force_exit = True
+                    exit_reason = f"TAKE_PROFIT (+{current_pnl_pct*100:.1f}%)"
+
+            # 計算當日總資產
+            equity = cash + (position_shares * close_price)
+            portfolio_records.append({
+                "ts": date,
+                "open": open_price,
+                "close": close_price,
+                "cash": cash,
+                "position_shares": position_shares,
+                "stock_value": position_shares * close_price,
+                "total_equity": equity,
+                "signal": row.get("signal", 0)
+            })
+
+        portfolio_df = pd.DataFrame(portfolio_records)
+        portfolio_df["daily_return"] = portfolio_df["total_equity"].pct_change().fillna(0)
+        portfolio_df["cum_return"] = (portfolio_df["total_equity"] / self.initial_capital) - 1.0
+
+        return {
+            "strategy_name": strategy.name,
+            "portfolio": portfolio_df,
+            "trades": pd.DataFrame(trade_logs),
+            "initial_capital": self.initial_capital,
+            "final_equity": portfolio_df["total_equity"].iloc[-1] if not portfolio_df.empty else self.initial_capital
+        }
