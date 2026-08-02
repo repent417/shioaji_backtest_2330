@@ -1,6 +1,6 @@
 """
 Shioaji API 台股策略回測 GUI 系統
-提供桌面 GUI 介面，支援切換股票代碼、調整策略與風控參數，並可預覽與下載分析圖表。
+提供桌面 GUI 介面，支援切換股票代碼、可選紅漲綠跌 K 線或收盤折線、調整策略與風控參數，並可下載分析圖表。
 """
 import os
 import tkinter as tk
@@ -23,7 +23,6 @@ from src.backtest import (
     PerformanceEvaluator
 )
 
-# 設定 Matplotlib 中文字體
 plt.rcParams["font.sans-serif"] = ["Microsoft JhengHei", "SimHei", "Arial"]
 plt.rcParams["axes.unicode_minus"] = False
 
@@ -31,8 +30,8 @@ class BacktestGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("永豐金 Shioaji 台股策略回測與風控系統 GUI")
-        self.geometry("1280x820")
-        self.minsize(1024, 700)
+        self.geometry("1280x850")
+        self.minsize(1024, 720)
 
         # 狀態紀錄
         self.current_fig = None
@@ -93,13 +92,24 @@ class BacktestGUI(tk.Tk):
         self.combo_strategy.current(0)
         self.combo_strategy.pack(fill=tk.X, pady=(0, 10))
 
-        # 4. 初始資金 (TWD)
+        # 4. 主圖類型 (K線 vs 折線)
+        ttk.Label(left_frame, text="主圖繪製類型:", font=("Microsoft JhengHei", 10, "bold")).pack(anchor=tk.W, pady=(0, 2))
+        self.combo_chart_type = ttk.Combobox(left_frame, state="readonly", font=("Microsoft JhengHei", 10))
+        self.combo_chart_type["values"] = [
+            "紅漲綠跌 K線 (Candlestick)",
+            "收盤價折線 (Line Chart)"
+        ]
+        self.combo_chart_type.current(0)
+        self.combo_chart_type.pack(fill=tk.X, pady=(0, 10))
+        self.combo_chart_type.bind("<<ComboboxSelected>>", self.on_chart_type_changed)
+
+        # 5. 初始資金 (TWD)
         ttk.Label(left_frame, text="初始資金 (TWD):", font=("Microsoft JhengHei", 10)).pack(anchor=tk.W, pady=(0, 2))
         self.entry_capital = ttk.Entry(left_frame, font=("Microsoft JhengHei", 10))
         self.entry_capital.insert(0, "3000000")
         self.entry_capital.pack(fill=tk.X, pady=(0, 10))
 
-        # 5. 風控參數 (停損 / 停利 %)
+        # 6. 風控參數 (停損 / 停利 %)
         risk_frame = ttk.Frame(left_frame)
         risk_frame.pack(fill=tk.X, pady=(0, 15))
 
@@ -113,7 +123,7 @@ class BacktestGUI(tk.Tk):
         self.entry_tp.insert(0, "15.0")
         self.entry_tp.grid(row=0, column=3)
 
-        # 6. [🚀 開始回測] 按鈕
+        # 7. [🚀 開始回測] 按鈕
         self.btn_run = tk.Button(
             left_frame, 
             text="🚀 開始執行歷史回測", 
@@ -128,14 +138,14 @@ class BacktestGUI(tk.Tk):
         )
         self.btn_run.pack(fill=tk.X, pady=(0, 15))
 
-        # 7. 績效顯示卡片 (LabelFrame)
+        # 8. 績效顯示卡片 (LabelFrame)
         self.perf_frame = ttk.LabelFrame(left_frame, text=" 策略歷史績效報告 ", padding=10)
         self.perf_frame.pack(fill=tk.X, pady=(0, 15))
 
         self.lbl_init_cap = ttk.Label(self.perf_frame, text="初始資金 (TWD): --", font=("Microsoft JhengHei", 10))
         self.lbl_init_cap.pack(anchor=tk.W, pady=2)
 
-        self.lbl_final_eq = ttk.Label(self.perf_frame, text="期末資產 (TWD): --", font=("Microsoft JhengHei", 10, "bold"))
+        self.lbl_final_eq = ttk.Label(self.perf_frame, text="現有資產 (TWD): --", font=("Microsoft JhengHei", 10, "bold"))
         self.lbl_final_eq.pack(anchor=tk.W, pady=2)
 
         self.lbl_ret = ttk.Label(self.perf_frame, text="總報酬率 (%): --", font=("Microsoft JhengHei", 10, "bold"))
@@ -153,7 +163,7 @@ class BacktestGUI(tk.Tk):
         self.lbl_trades = ttk.Label(self.perf_frame, text="總交易次數: --", font=("Microsoft JhengHei", 10))
         self.lbl_trades.pack(anchor=tk.W, pady=2)
 
-        # 8. [💾 下載/儲存圖表] 按鈕 (初始為未啟用狀態)
+        # 9. [💾 下載/儲存圖表] 按鈕 (初始為未啟用狀態)
         self.btn_download = tk.Button(
             left_frame,
             text="💾 下載 / 儲存分析圖表 (.png)",
@@ -170,13 +180,18 @@ class BacktestGUI(tk.Tk):
         self.btn_download.pack(fill=tk.X, pady=(5, 0))
 
         # 右側圖表呈現區塊 Frame
-        right_frame = ttk.LabelFrame(main_paned, text=" 回測圖表預覽 (K線標記與權益曲線) ", padding=10)
+        right_frame = ttk.LabelFrame(main_paned, text=" 回測圖表預覽 (K線/折線與權益曲線) ", padding=10)
         main_paned.add(right_frame, weight=3)
 
         self.chart_container = ttk.Frame(right_frame)
         self.chart_container.pack(fill=tk.BOTH, expand=True)
 
         self.canvas_widget = None
+
+    def on_chart_type_changed(self, event=None):
+        """當使用者切換主圖類型 (K線 vs 折線) 時即時重繪"""
+        if self.last_result:
+            self._render_chart(self.last_result, self.stock_code)
 
     def run_backtest(self):
         code = self.entry_code.get().strip().upper()
@@ -268,7 +283,10 @@ class BacktestGUI(tk.Tk):
             self.canvas_widget.destroy()
 
         from src.backtest.plotter import BacktestPlotter
-        fig = BacktestPlotter.create_figure(result, stock_code=code)
+        chart_type_str = self.combo_chart_type.get()
+        chart_type = "line" if "折線" in chart_type_str else "candlestick"
+
+        fig = BacktestPlotter.create_figure(result, stock_code=code, chart_type=chart_type)
         self.current_fig = fig
 
         canvas = FigureCanvasTkAgg(fig, master=self.chart_container)

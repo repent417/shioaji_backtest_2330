@@ -1,6 +1,6 @@
 """
 Matplotlib Backtest Visualizer
-繪製真實台股 K 線圖 (紅漲綠跌 Candlesticks)、均線 / 布林通道 / RSI / MACD / KD 指標線與權益資產走勢圖
+支援切換「紅漲綠跌 K 線 (Candlesticks)」或「收盤價折線 (Line Chart)」，並動態繪製均線 / 布林通道 / RSI / MACD / KD 指標與權益曲線
 """
 import os
 import matplotlib.pyplot as plt
@@ -16,30 +16,27 @@ class BacktestPlotter:
     @staticmethod
     def _draw_candlesticks(ax, df: pd.DataFrame, width: float = 0.6):
         """在 Matplotlib ax 上繪製紅漲綠跌之真實 K 線 (Candlesticks)"""
-        # 計算價格漲跌顏色 (台股慣例：紅漲綠跌)
         up_df = df[df["close"] >= df["open"]]
         down_df = df[df["close"] < df["open"]]
 
-        # 1. 上漲 K 棒 (紅色)
         if not up_df.empty:
-            # 影線 (High to Low)
             ax.vlines(up_df["ts"], up_df["low"], up_df["high"], color="red", linewidth=1.0, zorder=2)
-            # 實體 K 棒 (Open to Close)
             heights = np.maximum(abs(up_df["close"] - up_df["open"]), 0.5)
             bottoms = np.minimum(up_df["open"], up_df["close"])
             ax.bar(up_df["ts"], heights, bottom=bottoms, width=width, color="red", edgecolor="red", zorder=3)
 
-        # 2. 下跌 K 棒 (綠色)
         if not down_df.empty:
-            # 影線 (High to Low)
             ax.vlines(down_df["ts"], down_df["low"], down_df["high"], color="green", linewidth=1.0, zorder=2)
-            # 實體 K 棒 (Open to Close)
             heights = np.maximum(abs(down_df["close"] - down_df["open"]), 0.5)
             bottoms = np.minimum(down_df["open"], down_df["close"])
             ax.bar(down_df["ts"], heights, bottom=bottoms, width=width, color="green", edgecolor="green", zorder=3)
 
     @staticmethod
-    def create_figure(result: Dict[str, Any], stock_code: str = "2330") -> plt.Figure:
+    def create_figure(result: Dict[str, Any], stock_code: str = "2330", chart_type: str = "candlestick") -> plt.Figure:
+        """
+        建立 Matplotlib Figure 圖表
+        :param chart_type: "candlestick" (K線圖) 或 "line" (收盤折線圖)
+        """
         portfolio = result["portfolio"]
         trades = result["trades"]
         strategy_name = result.get("strategy_name", "Backtest Strategy")
@@ -49,7 +46,6 @@ class BacktestPlotter:
             ax.text(0.5, 0.5, "無回測資料可供顯示", ha="center", va="center", fontsize=14)
             return fig
 
-        # 檢查是否有副圖指標 (RSI, MACD, KD)
         has_sub_indicator = any(col in portfolio.columns for col in ["rsi", "dif", "k"])
 
         if has_sub_indicator:
@@ -64,12 +60,13 @@ class BacktestPlotter:
             )
             ax_ind = None
 
-        # 1. 主圖：繪製真實 K 線圖 (紅漲綠跌)
-        BacktestPlotter._draw_candlesticks(ax1, portfolio, width=0.6)
-
-        # 增加圖例代理 (Proxy Legends for Candlesticks)
-        ax1.plot([], [], color="red", label="紅棒 (漲)", linewidth=3)
-        ax1.plot([], [], color="green", label="綠棒 (跌)", linewidth=3)
+        # 1. 主圖：根據 chart_type 選擇繪製 K 線還是折線
+        if chart_type == "line":
+            ax1.plot(portfolio["ts"], portfolio["close"], label=f"[{stock_code}] 收盤價", color="#1f77b4", linewidth=1.5, zorder=3)
+        else: # "candlestick" (預設)
+            BacktestPlotter._draw_candlesticks(ax1, portfolio, width=0.6)
+            ax1.plot([], [], color="red", label="紅棒 (漲)", linewidth=3)
+            ax1.plot([], [], color="green", label="綠棒 (跌)", linewidth=3)
 
         # 繪製均線 (SMA)
         if "sma_short" in portfolio.columns and "sma_long" in portfolio.columns:
@@ -94,7 +91,8 @@ class BacktestPlotter:
             if not sell_trades.empty:
                 ax1.scatter(sell_trades["date"], sell_trades["price"], marker="v", color="darkgreen", s=110, label="賣出 (SELL)", zorder=6)
 
-        ax1.set_title(f"[{stock_code}] 歷史日 K 線 (紅漲綠跌) 與指標 - {strategy_name}", fontsize=12, fontweight="bold")
+        title_type = "日 K 線 (紅漲綠跌)" if chart_type == "candlestick" else "收盤折線"
+        ax1.set_title(f"[{stock_code}] 歷史股價 ({title_type}) 與指標 - {strategy_name}", fontsize=12, fontweight="bold")
         ax1.set_ylabel("股價 (TWD)", fontsize=10)
         ax1.grid(True, linestyle="--", alpha=0.5)
         ax1.legend(loc="upper left", fontsize=8)
@@ -141,12 +139,12 @@ class BacktestPlotter:
         return fig
 
     @classmethod
-    def plot(cls, result: Dict[str, Any], save_path: str = os.path.join("output", "backtest_result.png"), stock_code: str = "2330"):
+    def plot(cls, result: Dict[str, Any], save_path: str = os.path.join("output", "backtest_result.png"), stock_code: str = "2330", chart_type: str = "candlestick"):
         dir_name = os.path.dirname(save_path)
         if dir_name:
             os.makedirs(dir_name, exist_ok=True)
             
-        fig = cls.create_figure(result, stock_code=stock_code)
+        fig = cls.create_figure(result, stock_code=stock_code, chart_type=chart_type)
         fig.savefig(save_path, dpi=300)
         plt.close(fig)
         print(f"回測分析圖表已成功儲存至: {os.path.abspath(save_path)}")
