@@ -1,0 +1,74 @@
+# 🧠 Second Brain - 永豐金 Shioaji 量化回測與交易系統想法日誌 (Ideas Log)
+
+> **建立日期**: 2026-08-02  
+> **專案名稱**: Shioaji TW Stock Quantitative Backtesting & Risk Management System  
+> **Repository**: [repent417/shioaji_backtest_2330](https://github.com/repent417/shioaji_backtest_2330)
+
+---
+
+## 📌 一、 專案核心願景與里程碑 (Milestones Achieved)
+
+本專案旨在建立一套高效、穩定且符合台灣股市實務交易成本的 **台股量化回測與桌面 GUI 風控系統**。
+
+### 核心技術亮點：
+1. **Shioaji API 限制突破與 SQLite 快取**：
+   - 解決 API 單次最多僅能查詢 30 天 K 線之限制，建立 28 天自動分段下載與迴圈拼貼機制。
+   - 建立本地 SQLite 快取資料庫 (`data/kbars_cache.db`)，採用 `INSERT OR REPLACE INTO` 原子語法，實現 **先查本地 DB 秒級載入、缺資料才連線 API 下載** 之高效兩階段快取機制。
+2. **符合台股慣例之視覺化畫布**：
+   - 使用 Vanilla Matplotlib 開發 **紅漲綠跌 K 線圖 (OHLC Candlesticks)**，繪製真實開高低收影線與實體棒身。
+   - 支援雙均線 (SMA)、布林通道 (Bollinger)、RSI、MACD、KD 等指標雙圖/三圖疊加，並標示買賣點箭頭。
+   - 提供**即時切換 K 線或收盤折線圖**模式。
+3. **兩階段移動停利與突破前高接回 (Two-Step Trailing Stop & Breakout Re-entry)**：
+   - **第一階段**：達到目標獲利門檻 (例如 +15%) 後，才正式激活高點追蹤模式。
+   - **第二階段**：激活後，追蹤持股期間最高價 Peak High，若自高點拉回 X% (例如 5%) 自動執行移動停利。
+   - **突破接回**：停利離場後，若股價重新突破上一次波段最高價，自動觸發 `BUY (RE-ENTRY)` 追價接回，不錯過超大牛皮波段。
+   - **離場鎖定**：風控離場後自動鎖定，無視舊趨勢訊號，直至下一次全新黃金交叉才重新進場。
+4. **交易明細與詳細參數 CSV 匯出**：
+   - 右側分頁提供 `Treeview` 交易明細表格，帶買賣動作顏色高亮。
+   - 支援一鍵匯出帶有完整策略測試設定 Header 的 `utf-8-sig` (帶 BOM) CSV 試算表，直接以 Excel 開啟無亂碼。
+
+---
+
+## 💡 二、 系統想法與未來發展藍圖 (Future Ideas & Roadmap)
+
+### 🔹 想法 1：全台股批次選股與掃描器 (Universe Stock Scanner)
+- **概念**：目前系統為單一股票 (如 2330, 2317) 輸入與回測，可進一步擴充 **「全台股/成分股 (如 0050, 0056, 自選股) 自動掃描器」**。
+- **應用**：每日收盤後自動拉取全台股今日 K 線，自動篩選出今日剛好出現「黃金交叉」或「突破前高」且「近 20 日波動率合理」的潛力股票清單。
+
+### 🔹 想法 2：籌碼面與基本面複合因子選股 (Multi-factor Strategy)
+- **概念**：單純技術指標易在震盪市中面臨洗盤，可整合籌碼面與基本面數據。
+- **應用**：
+  - **籌碼面**：三大法人（外資、投信）連續買超 N 天 + 技術面黃金交叉 才觸發買進。
+  - **基本面**：近 3 個月營收年增率 (YoY) > 10% + PE < 20。
+
+### 🔹 想法 3：蒙地卡羅模擬與資產組合最佳化 (Portfolio Optimization & Monte Carlo)
+- **概念**：評估策略在未來極端行情下的破產風險 (Probability of Ruin) 與最大可能回撤。
+- **應用**：
+  - **Markowitz 均值-變異數模型** 或 **夏普比率最大化 (Sharpe Maximization)**：自動計算各股票資產配置的最佳權重。
+  - **蒙地卡羅重抽樣 (Bootstrap)**：模擬 1,000 次未來收益分配情況。
+
+### 🔹 想法 4：Shioaji 自動化模擬/實盤策略下單機器人 (Live Trading Bot)
+- **概念**：將回測驗證成功的策略實例化，連結 Shioaji API 的 `shioaji.order` 與 `shioaji.quote` 模組。
+- **應用**：
+  - 盤中即時訂閱逐筆洗價 (Tick Data) 或 1分/5分/日 K 線。
+  - 當滿足買賣條件時，自動送出證券委託單 (使用觸價單或限價單)，並帶有自動停損/停利掛單。
+
+### 🔹 想法 5：Web / Dashboard 視覺化與微服務化 (Modern Web Dashboard)
+- **概念**：將現有 Tkinter GUI 升級或擴充為現代化 Web Dashboard。
+- **技術棧選項**：
+  - **Streamlit / FastHTML**：極速建立 Python 純 Web 互動介面。
+  - **Next.js + FastAPI / Python Sidecar**：建立極致美觀、現代化黑金視覺風的專業 Web 量化工作站。
+
+---
+
+## 📝 三、 開發筆記與踩坑經驗 (Lessons Learned)
+
+1. **Shioaji Login Timeout 參數**：`shioaji 1.3.2` 中 `api.login()` 不接受 `timeout` 參數，需使用預設 `api.login(api_key, secret_key)`。
+2. **SQLite 多線程與主鍵**：`daily_kbars` 應設定 `PRIMARY KEY (code, ts)`，且寫入時使用 `INSERT OR REPLACE INTO` (Upsert)，防止 `IntegrityError`。
+3. **Tkinter GUI 完全退出**：嵌入 Matplotlib `FigureCanvasTkAgg` 時，點擊視窗 X 按鈕必須呼叫 `plt.close("all")` 隨後 `os._exit(0)`，否則 Python 容易殘留背景無頭進程。
+4. **勝率計算模糊比對**：離場與接回標籤包含 `SELL (RISK)` 與 `BUY (RE-ENTRY)` 時，對比條件必須用 `action.str.contains("BUY")`，否則會因嚴格比對失敗導致勝率誤算為 `0.0%`。
+5. **CSV 表頭 UTF-8 BOM 碼**：寫入包含中文的中文字串 CSV 時，採用 `utf-8-sig` 編碼才能避免 Windows Excel 打開時產生亂碼。
+
+---
+
+*Last Updated: 2026-08-02 by Antigravity AI & USER*
