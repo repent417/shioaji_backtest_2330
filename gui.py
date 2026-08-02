@@ -1,6 +1,6 @@
 """
 Shioaji API 台股策略回測 GUI 系統
-提供桌面 GUI 介面，支援切換股票代碼、K線/折線圖表預覽、交易明細表格 (Trade Logs Table)、風控開關與圖表下載。
+提供桌面 GUI 介面，支援切換股票代碼、高點拉回移動停利 (Trailing Stop)、突破前高重新接回、K線/折線圖預覽、交易明細與圖表下載。
 """
 import os
 import tkinter as tk
@@ -31,8 +31,8 @@ class BacktestGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("永豐金 Shioaji 台股策略回測與風控系統 GUI")
-        self.geometry("1380x880")
-        self.minsize(1024, 750)
+        self.geometry("1400x900")
+        self.minsize(1024, 760)
 
         # 狀態紀錄
         self.current_fig = None
@@ -110,31 +110,40 @@ class BacktestGUI(tk.Tk):
         self.entry_capital.insert(0, "3000000")
         self.entry_capital.pack(fill=tk.X, pady=(0, 10))
 
-        # 6. 風控選擇 (可勾選是否啟用主動停損停利)
+        # 6. 風控選擇 (硬停損與高點拉回移動停利)
         self.var_enable_risk = tk.BooleanVar(value=True)
         self.chk_risk = ttk.Checkbutton(
             left_frame,
-            text=" 啟用主動停損停利風控",
+            text=" 啟用風控機制 (停損 & 移動停利)",
             variable=self.var_enable_risk,
             command=self.on_risk_toggle
         )
         self.chk_risk.pack(anchor=tk.W, pady=(0, 5))
 
-        # 風控數值設定 Frame (停損 / 停利 %)
+        # 風控數值設定 Frame (硬停損 % 與 高點拉回停利 %)
         self.risk_frame = ttk.Frame(left_frame)
-        self.risk_frame.pack(fill=tk.X, pady=(0, 15))
+        self.risk_frame.pack(fill=tk.X, pady=(0, 8))
 
-        ttk.Label(self.risk_frame, text="停損 (%):").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
-        self.entry_sl = ttk.Entry(self.risk_frame, width=8)
+        ttk.Label(self.risk_frame, text="硬停損 (%):").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        self.entry_sl = ttk.Entry(self.risk_frame, width=7)
         self.entry_sl.insert(0, "5.0")
-        self.entry_sl.grid(row=0, column=1, padx=(0, 15))
+        self.entry_sl.grid(row=0, column=1, padx=(0, 10))
 
-        ttk.Label(self.risk_frame, text="停利 (%):").grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
-        self.entry_tp = ttk.Entry(self.risk_frame, width=8)
-        self.entry_tp.insert(0, "15.0")
-        self.entry_tp.grid(row=0, column=3)
+        ttk.Label(self.risk_frame, text="高點拉回停利 (%):").grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
+        self.entry_ts = ttk.Entry(self.risk_frame, width=7)
+        self.entry_ts.insert(0, "5.0")
+        self.entry_ts.grid(row=0, column=3)
 
-        # 7. [🚀 開始回測] 按鈕
+        # 7. 突破前高重新接回 勾選框 (可選)
+        self.var_enable_reentry = tk.BooleanVar(value=True)
+        self.chk_reentry = ttk.Checkbutton(
+            left_frame,
+            text=" 停利後若突破前高重新接回 (Re-entry)",
+            variable=self.var_enable_reentry
+        )
+        self.chk_reentry.pack(anchor=tk.W, pady=(0, 15))
+
+        # 8. [🚀 開始回測] 按鈕
         self.btn_run = tk.Button(
             left_frame, 
             text="🚀 開始執行歷史回測", 
@@ -149,7 +158,7 @@ class BacktestGUI(tk.Tk):
         )
         self.btn_run.pack(fill=tk.X, pady=(0, 15))
 
-        # 8. 績效顯示卡片 (LabelFrame)
+        # 9. 績效顯示卡片 (LabelFrame)
         self.perf_frame = ttk.LabelFrame(left_frame, text=" 策略歷史績效報告 ", padding=10)
         self.perf_frame.pack(fill=tk.X, pady=(0, 15))
 
@@ -174,7 +183,7 @@ class BacktestGUI(tk.Tk):
         self.lbl_trades = ttk.Label(self.perf_frame, text="總交易次數: --", font=("Microsoft JhengHei", 10))
         self.lbl_trades.pack(anchor=tk.W, pady=2)
 
-        # 9. [💾 下載/儲存圖表] 按鈕 (初始為未啟用狀態)
+        # 10. [💾 下載/儲存圖表] 按鈕 (初始為未啟用狀態)
         self.btn_download = tk.Button(
             left_frame,
             text="💾 下載 / 儲存分析圖表 (.png)",
@@ -218,7 +227,6 @@ class BacktestGUI(tk.Tk):
 
         self.tree_trades = ttk.Treeview(table_frame, columns=columns, show="headings", height=20)
         
-        # 定義表頭欄位名稱與對齊
         headers = {
             "date": "交易日期",
             "action": "買賣動作",
@@ -234,14 +242,12 @@ class BacktestGUI(tk.Tk):
             self.tree_trades.heading(col, text=text)
             self.tree_trades.column(col, anchor=tk.CENTER, width=110)
 
-        # 增加垂直滾動條 (Scrollbar)
         scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.tree_trades.yview)
         self.tree_trades.configure(yscrollcommand=scrollbar.set)
 
         self.tree_trades.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # 設定樣式標籤 (BUY 顯示紅色字, SELL 顯示綠色字)
         self.tree_trades.tag_configure("BUY", foreground="red")
         self.tree_trades.tag_configure("SELL", foreground="green")
 
@@ -249,10 +255,12 @@ class BacktestGUI(tk.Tk):
         """勾選/取消主動停損停利時動態切換輸入框狀態"""
         if self.var_enable_risk.get():
             self.entry_sl.config(state=tk.NORMAL)
-            self.entry_tp.config(state=tk.NORMAL)
+            self.entry_ts.config(state=tk.NORMAL)
+            self.chk_reentry.config(state=tk.NORMAL)
         else:
             self.entry_sl.config(state=tk.DISABLED)
-            self.entry_tp.config(state=tk.DISABLED)
+            self.entry_ts.config(state=tk.DISABLED)
+            self.chk_reentry.config(state=tk.DISABLED)
 
     def on_chart_type_changed(self, event=None):
         """當使用者切換主圖類型 (K線 vs 折線) 時即時重繪"""
@@ -271,10 +279,12 @@ class BacktestGUI(tk.Tk):
             
             if self.var_enable_risk.get():
                 sl_pct = float(self.entry_sl.get().strip()) / 100.0 if self.entry_sl.get().strip() else None
-                tp_pct = float(self.entry_tp.get().strip()) / 100.0 if self.entry_tp.get().strip() else None
+                ts_pct = float(self.entry_ts.get().strip()) / 100.0 if self.entry_ts.get().strip() else None
+                enable_reentry = self.var_enable_reentry.get()
             else:
                 sl_pct = None
-                tp_pct = None
+                ts_pct = None
+                enable_reentry = False
         except ValueError:
             messagebox.showerror("錯誤", "請確認天數、資金與風控數值皆為合法的數字！")
             return
@@ -332,11 +342,12 @@ class BacktestGUI(tk.Tk):
             else:
                 strategy = KDStrategy(period=9)
 
-            # 3. 執行回測引擎
+            # 3. 執行回測引擎 (含移動停利與突破前高接回)
             engine = BacktestEngine(
                 initial_capital=capital,
                 stop_loss_pct=sl_pct,
-                take_profit_pct=tp_pct
+                trailing_stop_pct=ts_pct,
+                enable_reentry=enable_reentry
             )
             result = engine.run(df=df_kbars, strategy=strategy)
             self.last_result = result
@@ -370,7 +381,6 @@ class BacktestGUI(tk.Tk):
 
     def _update_trades_table(self, trades_df: pd.DataFrame):
         """刷新並充填交易明細表格"""
-        # 清空舊數據
         for item in self.tree_trades.get_children():
             self.tree_trades.delete(item)
 

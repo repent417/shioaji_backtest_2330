@@ -1,6 +1,6 @@
 """
-Taiwan Stock Backtest Engine with Smart Risk Controls (Solution 1: Wait for new signal after risk exit)
-考量台股交易成本與主動風控（停損/停利離場後需等待全新指標買訊才可再次進場）
+Taiwan Stock Backtest Engine with Trailing Stop & High-Breakout Re-entry
+支援台股交易成本、高點拉回 X% 移動停利 (Trailing Stop) 與 突破前高重新接回機制
 """
 import pandas as pd
 import numpy as np
@@ -16,8 +16,9 @@ class BacktestEngine:
         min_commission: float = 20.0,
         tax_rate: float = 0.003,        # 賣出證交稅 0.3%
         shares_per_lot: int = 1000,
-        stop_loss_pct: Optional[float] = None,   # 停損百分比 (例如 0.05 代表 -5%)
-        take_profit_pct: Optional[float] = None  # 停利百分比 (例如 0.15 代表 +15%)
+        stop_loss_pct: Optional[float] = None,      # 硬停損 (例如 0.05 代表 -5%)
+        trailing_stop_pct: Optional[float] = None,  # 高點拉回移動停利 (例如 0.05 代表高點拉回 5%)
+        enable_reentry: bool = False                # 停利後突破前高是否重新接回
     ):
         self.initial_capital = initial_capital
         self.commission_rate = commission_rate
@@ -26,7 +27,8 @@ class BacktestEngine:
         self.tax_rate = tax_rate
         self.shares_per_lot = shares_per_lot
         self.stop_loss_pct = stop_loss_pct
-        self.take_profit_pct = take_profit_pct
+        self.trailing_stop_pct = trailing_stop_pct
+        self.enable_reentry = enable_reentry
 
     def run(self, df: pd.DataFrame, strategy: BaseStrategy) -> Dict[str, Any]:
         data = strategy.generate_signals(df)
@@ -34,25 +36,35 @@ class BacktestEngine:
         cash = self.initial_capital
         position_shares = 0
         entry_price = 0.0
+        highest_price_since_entry = 0.0
+        last_peak_price = 0.0            # 紀錄停利時的高點
+        reentry_triggered = False        # 標記突破前高觸發接回
+
         portfolio_records = []
         trade_logs = []
         force_exit = False
         exit_reason = ""
-        risk_exited = False  # 標記是否因為停損/停利離場 (需等待新買訊重置)
+        risk_exited = False
 
         for i, row in data.iterrows():
             date = row["ts"]
             close_price = row["close"]
             open_price = row["open"]
-            raw_signal = row.get("signal", 0)  # 當天未 shift 的指標訊號 (0 或 1)
+            high_price = row.get("high", close_price)
+            raw_signal = row.get("signal", 0)  # 指標訊號 (0 或 1)
 
-            # 當指標訊號歸零 (如均線死亡交叉離場) 時，重置風控鎖定狀態
+            # 當指標訊號歸零 (如均線死亡交叉離場) 時，重置風控鎖定狀態與前高紀錄
             if raw_signal == 0:
                 risk_exited = False
+                last_peak_price = 0.0
 
-            target_signal = row["position"]  # 前一日 signal 轉移而來的目標部位
+            target_signal = row["position"]
 
-            # 1. 處理上一日觸發之風控離場 (STOP_LOSS / TAKE_PROFIT)
+            # 1. 持股期間動態更新最高價 (最高價追蹤)
+            if position_shares > 0:
+                highest_price_since_entry = max(highest_price_since_entry, high_price)
+
+            # 2. 處理上一日觸發之風控離場 (STOP_LOSS / TRAILING_STOP)
             if force_exit and position_shares > 0:
                 sell_shares = position_shares
                 sell_val = sell_shares * open_price
@@ -74,10 +86,34 @@ class BacktestEngine:
                 position_shares = 0
                 entry_price = 0.0
                 force_exit = False
-                risk_exited = True  # 鎖定離場狀態，在舊趨勢結束前禁止再次買入
+                risk_exited = True  # 鎖定離場狀態
 
-            # 2. 正常買賣處理
-            # 若處於 risk_exited 鎖定狀態，無視舊趨勢訊號，禁止買進
+            # 3. 處理突破前高重新接回 (Breakout Re-entry)
+            if reentry_triggered and position_shares == 0 and cash >= (open_price * self.shares_per_lot):
+                buy_shares = self.shares_per_lot
+                buy_cost = buy_shares * open_price
+                comm = max(self.min_commission, buy_cost * self.commission_rate * self.discount)
+                total_spend = buy_cost + comm
+
+                cash -= total_spend
+                position_shares = buy_shares
+                entry_price = open_price
+                highest_price_since_entry = open_price
+                risk_exited = False
+                reentry_triggered = False
+                
+                trade_logs.append({
+                    "date": date,
+                    "action": "BUY (RE-ENTRY)",
+                    "price": open_price,
+                    "shares": buy_shares,
+                    "amount": buy_cost,
+                    "fee": comm,
+                    "tax": 0.0,
+                    "reason": f"BREAKOUT ({last_peak_price:.1f})"
+                })
+
+            # 4. 正常買賣處理
             effective_target_signal = 0 if risk_exited else target_signal
             current_target_shares = effective_target_signal * self.shares_per_lot
             share_diff = current_target_shares - position_shares
@@ -102,6 +138,7 @@ class BacktestEngine:
                     cash -= total_spend
                     position_shares += actual_shares
                     entry_price = open_price
+                    highest_price_since_entry = open_price
                     trade_logs.append({
                         "date": date,
                         "action": "BUY",
@@ -123,6 +160,7 @@ class BacktestEngine:
                 cash += net_revenue
                 position_shares = 0
                 entry_price = 0.0
+                highest_price_since_entry = 0.0
                 trade_logs.append({
                     "date": date,
                     "action": "SELL",
@@ -134,17 +172,28 @@ class BacktestEngine:
                     "reason": "SIGNAL"
                 })
 
-            # 3. 盤後檢視是否觸發停損停利 (提供下一個交易日開盤離場)
+            # 5. 盤後風控檢視：硬停損與高點拉回移動停利 (Trailing Stop)
             if position_shares > 0 and entry_price > 0:
                 current_pnl_pct = (close_price - entry_price) / entry_price
+                
+                # 硬停損檢視
                 if self.stop_loss_pct and self.stop_loss_pct > 0 and current_pnl_pct <= -abs(self.stop_loss_pct):
                     force_exit = True
                     exit_reason = f"STOP_LOSS ({current_pnl_pct*100:.1f}%)"
-                elif self.take_profit_pct and self.take_profit_pct > 0 and current_pnl_pct >= abs(self.take_profit_pct):
-                    force_exit = True
-                    exit_reason = f"TAKE_PROFIT (+{current_pnl_pct*100:.1f}%)"
+                # 高點拉回移動停利檢視 (Trailing Stop)
+                elif self.trailing_stop_pct and self.trailing_stop_pct > 0 and highest_price_since_entry > entry_price:
+                    pullback_pct = (highest_price_since_entry - close_price) / highest_price_since_entry
+                    if pullback_pct >= abs(self.trailing_stop_pct):
+                        force_exit = True
+                        last_peak_price = highest_price_since_entry
+                        exit_reason = f"TRAILING_STOP (Peak:{highest_price_since_entry:.1f}, Pullback:-{pullback_pct*100:.1f}%)"
 
-            # 4. 紀錄資產
+            # 6. 檢視離場後是否突破前高準備接回 (Breakout Check)
+            if position_shares == 0 and self.enable_reentry and last_peak_price > 0:
+                if close_price > last_peak_price:
+                    reentry_triggered = True
+
+            # 7. 紀錄每日資產
             equity = cash + (position_shares * close_price)
             portfolio_records.append({
                 "ts": date,
