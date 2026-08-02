@@ -214,16 +214,24 @@ class BacktestGUI(tk.Tk):
 
         try:
             # 1. 取得數據 (優先查詢本地 DB 快取)
+            cutoff_dt = pd.to_datetime(datetime.now() - timedelta(days=days))
             df_kbars = self.db_cache.load_kbars(code=code)
-            if df_kbars.empty or len(df_kbars) < (days * 0.5):
+
+            # 若本地 DB 無資料或覆蓋天數不夠，向 Shioaji API 增量抓取
+            if df_kbars.empty or df_kbars["ts"].min() > cutoff_dt:
                 simulation_env = os.getenv("SIMULATION", "True").lower() == "true"
                 client = ShioajiClient(simulation=simulation_env)
                 if client.login():
-                    df_kbars = client.get_daily_kbars(code=code, days=days)
-                    self.db_cache.save_kbars(code=code, df=df_kbars)
+                    fetched_df = client.get_daily_kbars(code=code, days=days)
+                    self.db_cache.save_kbars(code=code, df=fetched_df)
+                    df_kbars = self.db_cache.load_kbars(code=code)
                     client.logout()
                 else:
                     df_kbars = client._generate_mock_kbars(code=code, days=int(days*0.7))
+
+            # 根據使用者輸入之天數 (days) 進行精確日期區間過濾
+            if not df_kbars.empty:
+                df_kbars = df_kbars[df_kbars["ts"] >= cutoff_dt].reset_index(drop=True)
 
             if df_kbars.empty:
                 messagebox.showerror("錯誤", f"無法取得股票 [{code}] 的歷史數據。")
