@@ -1,6 +1,6 @@
 """
 Shioaji API 台股策略回測 GUI 系統
-提供桌面 GUI 介面，支援切換股票代碼、高點拉回移動停利 (Trailing Stop)、突破前高重新接回、K線/折線圖預覽、交易明細與圖表下載。
+提供桌面 GUI 介面，支援切換股票代碼、兩階段移動停利 (目標停利達標後啟動高點拉回)、突破前高重新接回、K線/折線圖預覽、交易明細與圖表下載。
 """
 import os
 import tkinter as tk
@@ -31,8 +31,8 @@ class BacktestGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("永豐金 Shioaji 台股策略回測與風控系統 GUI")
-        self.geometry("1400x900")
-        self.minsize(1024, 760)
+        self.geometry("1420x920")
+        self.minsize(1024, 780)
 
         # 狀態紀錄
         self.current_fig = None
@@ -110,7 +110,7 @@ class BacktestGUI(tk.Tk):
         self.entry_capital.insert(0, "3000000")
         self.entry_capital.pack(fill=tk.X, pady=(0, 10))
 
-        # 6. 風控選擇 (硬停損與高點拉回移動停利)
+        # 6. 風控選擇 (硬停損 & 兩階段移動停利)
         self.var_enable_risk = tk.BooleanVar(value=True)
         self.chk_risk = ttk.Checkbutton(
             left_frame,
@@ -120,19 +120,26 @@ class BacktestGUI(tk.Tk):
         )
         self.chk_risk.pack(anchor=tk.W, pady=(0, 5))
 
-        # 風控數值設定 Frame (硬停損 % 與 高點拉回停利 %)
+        # 風控數值設定 Frame (停損 % / 目標停利 % / 高點拉回 %)
         self.risk_frame = ttk.Frame(left_frame)
         self.risk_frame.pack(fill=tk.X, pady=(0, 8))
 
-        ttk.Label(self.risk_frame, text="硬停損 (%):").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        # 第一行: 硬停損 %
+        ttk.Label(self.risk_frame, text="硬停損 (%):").grid(row=0, column=0, sticky=tk.W, padx=(0, 5), pady=2)
         self.entry_sl = ttk.Entry(self.risk_frame, width=7)
         self.entry_sl.insert(0, "5.0")
-        self.entry_sl.grid(row=0, column=1, padx=(0, 10))
+        self.entry_sl.grid(row=0, column=1, padx=(0, 10), pady=2)
 
-        ttk.Label(self.risk_frame, text="高點拉回停利 (%):").grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
+        # 第二行: 激活目標停利 % 與 高點拉回 %
+        ttk.Label(self.risk_frame, text="目標停利 (%):").grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=2)
+        self.entry_tp = ttk.Entry(self.risk_frame, width=7)
+        self.entry_tp.insert(0, "15.0")
+        self.entry_tp.grid(row=1, column=1, padx=(0, 10), pady=2)
+
+        ttk.Label(self.risk_frame, text="高點拉回 (%):").grid(row=1, column=2, sticky=tk.W, padx=(0, 5), pady=2)
         self.entry_ts = ttk.Entry(self.risk_frame, width=7)
         self.entry_ts.insert(0, "5.0")
-        self.entry_ts.grid(row=0, column=3)
+        self.entry_ts.grid(row=1, column=3, pady=2)
 
         # 7. 突破前高重新接回 勾選框 (可選)
         self.var_enable_reentry = tk.BooleanVar(value=True)
@@ -255,10 +262,12 @@ class BacktestGUI(tk.Tk):
         """勾選/取消主動停損停利時動態切換輸入框狀態"""
         if self.var_enable_risk.get():
             self.entry_sl.config(state=tk.NORMAL)
+            self.entry_tp.config(state=tk.NORMAL)
             self.entry_ts.config(state=tk.NORMAL)
             self.chk_reentry.config(state=tk.NORMAL)
         else:
             self.entry_sl.config(state=tk.DISABLED)
+            self.entry_tp.config(state=tk.DISABLED)
             self.entry_ts.config(state=tk.DISABLED)
             self.chk_reentry.config(state=tk.DISABLED)
 
@@ -279,10 +288,12 @@ class BacktestGUI(tk.Tk):
             
             if self.var_enable_risk.get():
                 sl_pct = float(self.entry_sl.get().strip()) / 100.0 if self.entry_sl.get().strip() else None
+                tp_pct = float(self.entry_tp.get().strip()) / 100.0 if self.entry_tp.get().strip() else None
                 ts_pct = float(self.entry_ts.get().strip()) / 100.0 if self.entry_ts.get().strip() else None
                 enable_reentry = self.var_enable_reentry.get()
             else:
                 sl_pct = None
+                tp_pct = None
                 ts_pct = None
                 enable_reentry = False
         except ValueError:
@@ -342,10 +353,11 @@ class BacktestGUI(tk.Tk):
             else:
                 strategy = KDStrategy(period=9)
 
-            # 3. 執行回測引擎 (含移動停利與突破前高接回)
+            # 3. 執行回測引擎 (含兩階段移動停利與突破前高接回)
             engine = BacktestEngine(
                 initial_capital=capital,
                 stop_loss_pct=sl_pct,
+                take_profit_pct=tp_pct,
                 trailing_stop_pct=ts_pct,
                 enable_reentry=enable_reentry
             )
