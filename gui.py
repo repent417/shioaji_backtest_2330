@@ -246,41 +246,8 @@ class BacktestGUI(tk.Tk):
         if self.canvas_widget:
             self.canvas_widget.destroy()
 
-        portfolio = result["portfolio"]
-        trades = result["trades"]
-        strategy_name = result.get("strategy_name", "Strategy")
-
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 6), sharex=True, gridspec_kw={"height_ratios": [2.5, 1]})
-
-        ax1.plot(portfolio["ts"], portfolio["close"], label=f"[{code}] Close Price", color="#1f77b4", linewidth=1.5)
-        
-        if not trades.empty:
-            buy_trades = trades[trades["action"].str.contains("BUY")]
-            sell_trades = trades[trades["action"].str.contains("SELL")]
-
-            if not buy_trades.empty:
-                ax1.scatter(buy_trades["date"], buy_trades["price"], marker="^", color="red", s=90, label="BUY Signal", zorder=5)
-            if not sell_trades.empty:
-                ax1.scatter(sell_trades["date"], sell_trades["price"], marker="v", color="green", s=90, label="SELL Signal", zorder=5)
-
-        ax1.set_title(f"[{code}] 歷史股價買賣點標記 - {strategy_name}", fontsize=12, fontweight="bold")
-        ax1.set_ylabel("股價 (TWD)", fontsize=10)
-        ax1.grid(True, linestyle="--", alpha=0.5)
-        ax1.legend(loc="upper left")
-
-        ax2.plot(portfolio["ts"], portfolio["total_equity"], label="Total Equity (TWD)", color="#ff7f0e", linewidth=2)
-        ax2.axhline(y=result["initial_capital"], color="gray", linestyle="--", alpha=0.7, label="Initial Capital")
-        
-        ax2.set_title("策略權益資產走勢曲線 (Equity Curve)", fontsize=10, fontweight="bold")
-        ax2.set_xlabel("日期", fontsize=10)
-        ax2.set_ylabel("資產 (TWD)", fontsize=10)
-        ax2.grid(True, linestyle="--", alpha=0.5)
-        ax2.legend(loc="upper left")
-
-        ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
-        fig.autofmt_xdate()
-        fig.tight_layout()
-
+        from src.backtest.plotter import BacktestPlotter
+        fig = BacktestPlotter.create_figure(result, stock_code=code)
         self.current_fig = fig
 
         canvas = FigureCanvasTkAgg(fig, master=self.chart_container)

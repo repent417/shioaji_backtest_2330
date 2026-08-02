@@ -1,66 +1,123 @@
 """
 Matplotlib Backtest Visualizer
-繪製日 K 線、均線、買賣點標籤與權益資產走勢圖 (Equity Curve)
+動態根據策略類型繪製 K 線、均線/布林通道/RSI/MACD/KD 指標線與權益資產走勢圖
 """
 import os
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import pandas as pd
+import numpy as np
 from typing import Dict, Any
 
-# 設定中文字體支援
 plt.rcParams["font.sans-serif"] = ["Microsoft JhengHei", "SimHei", "Arial"]
 plt.rcParams["axes.unicode_minus"] = False
 
 class BacktestPlotter:
     @staticmethod
-    def plot(result: Dict[str, Any], save_path: str = os.path.join("output", "backtest_result.png")):
-        dir_name = os.path.dirname(save_path)
-        if dir_name:
-            os.makedirs(dir_name, exist_ok=True)
-            
+    def create_figure(result: Dict[str, Any], stock_code: str = "2330") -> plt.Figure:
         portfolio = result["portfolio"]
         trades = result["trades"]
         strategy_name = result.get("strategy_name", "Backtest Strategy")
 
         if portfolio.empty:
-            print("無法繪製圖表：回測數據為空。")
-            return
+            fig, ax = plt.subplots(figsize=(9, 6))
+            ax.text(0.5, 0.5, "無回測資料可供顯示", ha="center", va="center", fontsize=14)
+            return fig
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 9), sharex=True, gridspec_kw={"height_ratios": [2.5, 1]})
+        # 檢查是否有副圖指標 (RSI, MACD, KD)
+        has_sub_indicator = any(col in portfolio.columns for col in ["rsi", "dif", "k"])
 
-        # 1. 主圖：股價與買賣交易標籤
-        ax1.plot(portfolio["ts"], portfolio["close"], label="Close Price", color="#1f77b4", linewidth=1.5)
-        
+        if has_sub_indicator:
+            fig, (ax1, ax_ind, ax_eq) = plt.subplots(
+                3, 1, figsize=(10, 8), sharex=True, 
+                gridspec_kw={"height_ratios": [2.2, 1.2, 1.2]}
+            )
+        else:
+            fig, (ax1, ax_eq) = plt.subplots(
+                2, 1, figsize=(10, 7), sharex=True, 
+                gridspec_kw={"height_ratios": [2.5, 1.2]}
+            )
+            ax_ind = None
+
+        # 1. 主圖：收盤價 + 均線 / 布林通道 + 買賣訊號標記
+        ax1.plot(portfolio["ts"], portfolio["close"], label=f"[{stock_code}] 收盤價", color="#1f77b4", linewidth=1.5)
+
+        # 繪製均線 (SMA)
+        if "sma_short" in portfolio.columns and "sma_long" in portfolio.columns:
+            ax1.plot(portfolio["ts"], portfolio["sma_short"], label="快線 (Short MA)", color="#ff7f0e", linestyle="--", linewidth=1.2)
+            ax1.plot(portfolio["ts"], portfolio["sma_long"], label="慢線 (Long MA)", color="#9467bd", linestyle="--", linewidth=1.2)
+        elif "sma" in portfolio.columns:
+            ax1.plot(portfolio["ts"], portfolio["sma"], label="中軌 (SMA)", color="#ff7f0e", linestyle="--", linewidth=1.2)
+
+        # 繪製布林通道 (Bollinger Bands)
+        if "upper_band" in portfolio.columns and "lower_band" in portfolio.columns:
+            ax1.plot(portfolio["ts"], portfolio["upper_band"], label="布林上軌", color="#2ca02c", linestyle=":", linewidth=1.2)
+            ax1.plot(portfolio["ts"], portfolio["lower_band"], label="布林下軌", color="#d62728", linestyle=":", linewidth=1.2)
+            ax1.fill_between(portfolio["ts"], portfolio["lower_band"], portfolio["upper_band"], color="#2ca02c", alpha=0.1, label="布林通道區域")
+
+        # 標記買賣點 (Buy/Sell Arrow Signals)
         if not trades.empty:
             buy_trades = trades[trades["action"].str.contains("BUY")]
             sell_trades = trades[trades["action"].str.contains("SELL")]
 
             if not buy_trades.empty:
-                ax1.scatter(buy_trades["date"], buy_trades["price"], marker="^", color="red", s=100, label="BUY Signal", zorder=5)
+                ax1.scatter(buy_trades["date"], buy_trades["price"], marker="^", color="red", s=90, label="買進 (BUY)", zorder=5)
             if not sell_trades.empty:
-                ax1.scatter(sell_trades["date"], sell_trades["price"], marker="v", color="green", s=100, label="SELL Signal", zorder=5)
+                ax1.scatter(sell_trades["date"], sell_trades["price"], marker="v", color="green", s=90, label="賣出 (SELL)", zorder=5)
 
-        ax1.set_title(f"2330 台積電歷史股價與買賣點標記 - {strategy_name}", fontsize=14, fontweight="bold")
-        ax1.set_ylabel("股價 (TWD)", fontsize=12)
+        ax1.set_title(f"[{stock_code}] 歷史股價與技術指標 - {strategy_name}", fontsize=12, fontweight="bold")
+        ax1.set_ylabel("股價 (TWD)", fontsize=10)
         ax1.grid(True, linestyle="--", alpha=0.5)
-        ax1.legend(loc="upper left")
+        ax1.legend(loc="upper left", fontsize=8)
 
-        # 2. 副圖：權益資產走勢圖 (Equity Curve)
-        ax2.plot(portfolio["ts"], portfolio["total_equity"], label="Total Equity (TWD)", color="#ff7f0e", linewidth=2)
-        ax2.axhline(y=result["initial_capital"], color="gray", linestyle="--", alpha=0.7, label="Initial Capital")
-        
-        ax2.set_title("策略權益資產走勢曲線 (Equity Curve)", fontsize=12, fontweight="bold")
-        ax2.set_xlabel("日期", fontsize=12)
-        ax2.set_ylabel("總資產 (TWD)", fontsize=12)
-        ax2.grid(True, linestyle="--", alpha=0.5)
-        ax2.legend(loc="upper left")
+        # 2. 中圖 (若有 RSI / MACD / KD 指標)
+        if ax_ind is not None:
+            if "rsi" in portfolio.columns:
+                ax_ind.plot(portfolio["ts"], portfolio["rsi"], label="RSI(14)", color="#8c564b", linewidth=1.3)
+                ax_ind.axhline(70, color="red", linestyle="--", alpha=0.6, label="超買線 (70)")
+                ax_ind.axhline(30, color="green", linestyle="--", alpha=0.6, label="超賣線 (30)")
+                ax_ind.set_ylabel("RSI 數值", fontsize=10)
+                ax_ind.set_ylim(0, 100)
+            elif "dif" in portfolio.columns and "macd_signal" in portfolio.columns:
+                ax_ind.plot(portfolio["ts"], portfolio["dif"], label="DIF 快線", color="#1f77b4", linewidth=1.2)
+                ax_ind.plot(portfolio["ts"], portfolio["macd_signal"], label="DEM 慢線", color="#ff7f0e", linewidth=1.2)
+                macd_hist = portfolio["dif"] - portfolio["macd_signal"]
+                colors = np.where(macd_hist >= 0, "red", "green")
+                ax_ind.bar(portfolio["ts"], macd_hist, color=colors, alpha=0.5, label="柱狀體 (Hist)")
+                ax_ind.set_ylabel("MACD", fontsize=10)
+            elif "k" in portfolio.columns and "d" in portfolio.columns:
+                ax_ind.plot(portfolio["ts"], portfolio["k"], label="K 線", color="#1f77b4", linewidth=1.2)
+                ax_ind.plot(portfolio["ts"], portfolio["d"], label="D 線", color="#ff7f0e", linewidth=1.2)
+                ax_ind.axhline(80, color="red", linestyle="--", alpha=0.6)
+                ax_ind.axhline(20, color="green", linestyle="--", alpha=0.6)
+                ax_ind.set_ylabel("KD 數值", fontsize=10)
+                ax_ind.set_ylim(0, 100)
 
-        # 格式化 X 軸日期
-        ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+            ax_ind.grid(True, linestyle="--", alpha=0.5)
+            ax_ind.legend(loc="upper left", fontsize=8)
+
+        # 3. 底圖：權益資產走勢圖 (Equity Curve)
+        ax_eq.plot(portfolio["ts"], portfolio["total_equity"], label="總資產 (Total Equity)", color="#ff7f0e", linewidth=2)
+        ax_eq.axhline(y=result["initial_capital"], color="gray", linestyle="--", alpha=0.7, label="初始資金")
+        ax_eq.set_title("策略權益資產走勢曲線 (Equity Curve)", fontsize=10, fontweight="bold")
+        ax_eq.set_xlabel("日期", fontsize=10)
+        ax_eq.set_ylabel("資產 (TWD)", fontsize=10)
+        ax_eq.grid(True, linestyle="--", alpha=0.5)
+        ax_eq.legend(loc="upper left", fontsize=8)
+
+        ax_eq.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
         fig.autofmt_xdate()
+        fig.tight_layout()
 
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=300)
-        plt.close()
+        return fig
+
+    @classmethod
+    def plot(cls, result: Dict[str, Any], save_path: str = os.path.join("output", "backtest_result.png"), stock_code: str = "2330"):
+        dir_name = os.path.dirname(save_path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+            
+        fig = cls.create_figure(result, stock_code=stock_code)
+        fig.savefig(save_path, dpi=300)
+        plt.close(fig)
         print(f"回測分析圖表已成功儲存至: {os.path.abspath(save_path)}")
