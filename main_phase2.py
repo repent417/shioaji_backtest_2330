@@ -67,8 +67,8 @@ def main():
         summary_list.append(metrics)
 
     summary_df = pd.DataFrame(summary_list)
-    print("\n【多策略績效總表比較】")
-    print(summary_df[["策略名稱", "總報酬率 (%)", "最大回撤 MDD (%)", "夏普比率 (Sharpe)", "總交易次數", "交易勝率 (%)"]].to_string(index=False))
+    print("\n【多策略績效總表比較 (含資金變化)】")
+    print(summary_df[["策略名稱", "初始資金 (TWD)", "期末資產 (TWD)", "總報酬率 (%)", "最大回撤 MDD (%)", "夏普比率 (Sharpe)", "總交易次數", "交易勝率 (%)"]].to_string(index=False))
 
     # 3. 風控機制示範 (加入 5% 停損與 15% 停利)
     print(f"\n[步驟 3/5] 風控機制測試 (5MA/10MA 策略 + 5% 停損 / 15% 停利)...")

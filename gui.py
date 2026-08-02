@@ -132,6 +132,12 @@ class BacktestGUI(tk.Tk):
         self.perf_frame = ttk.LabelFrame(left_frame, text=" 策略歷史績效報告 ", padding=10)
         self.perf_frame.pack(fill=tk.X, pady=(0, 15))
 
+        self.lbl_init_cap = ttk.Label(self.perf_frame, text="初始資金 (TWD): --", font=("Microsoft JhengHei", 10))
+        self.lbl_init_cap.pack(anchor=tk.W, pady=2)
+
+        self.lbl_final_eq = ttk.Label(self.perf_frame, text="期末資產 (TWD): --", font=("Microsoft JhengHei", 10, "bold"))
+        self.lbl_final_eq.pack(anchor=tk.W, pady=2)
+
         self.lbl_ret = ttk.Label(self.perf_frame, text="總報酬率 (%): --", font=("Microsoft JhengHei", 10, "bold"))
         self.lbl_ret.pack(anchor=tk.W, pady=2)
 
@@ -238,6 +244,8 @@ class BacktestGUI(tk.Tk):
             ret_val = metrics.get("總報酬率 (%)", "0.00%")
             ret_color = "red" if float(ret_val.replace("%", "")) > 0 else ("green" if float(ret_val.replace("%", "")) < 0 else "black")
             
+            self.lbl_init_cap.config(text=f"初始資金 (TWD):  NT$ {metrics.get('初始資金 (TWD)', '0')}")
+            self.lbl_final_eq.config(text=f"現有資產 (TWD):  NT$ {metrics.get('期末資產 (TWD)', '0')}", foreground=ret_color)
             self.lbl_ret.config(text=f"總報酬率 (%):  {ret_val}", foreground=ret_color)
             self.lbl_mdd.config(text=f"最大回撤 MDD (%):  {metrics.get('最大回撤 MDD (%)', '0.00%')}")
             self.lbl_sharpe.config(text=f"夏普比率 (Sharpe):  {metrics.get('夏普比率 (Sharpe)', '0.00')}")
