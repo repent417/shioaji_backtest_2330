@@ -35,10 +35,9 @@ class PerformanceEvaluator:
         # 計算勝率
         total_trades = len(trades)
         if total_trades > 1:
-            # 簡化統計：以買賣對結算的損益計算勝率
-            # 每一對 Buy/Sell 算一次交易
-            buy_trades = trades[trades["action"] == "BUY"].reset_index(drop=True)
-            sell_trades = trades[trades["action"] == "SELL"].reset_index(drop=True)
+            # 以買賣對結算的損益計算勝率 (包含風控平倉與突破接回交易)
+            buy_trades = trades[trades["action"].str.contains("BUY")].reset_index(drop=True)
+            sell_trades = trades[trades["action"].str.contains("SELL")].reset_index(drop=True)
             
             n_completed = min(len(buy_trades), len(sell_trades))
             wins = 0
