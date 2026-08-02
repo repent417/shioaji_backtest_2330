@@ -1,6 +1,6 @@
 """
-Taiwan Stock Backtest Engine with Risk Controls (Stop-Loss & Take-Profit)
-考慮台股交易成本與動態停損停利的專業回測引擎
+Taiwan Stock Backtest Engine with Smart Risk Controls (Solution 1: Wait for new signal after risk exit)
+考量台股交易成本與主動風控（停損/停利離場後需等待全新指標買訊才可再次進場）
 """
 import pandas as pd
 import numpy as np
@@ -37,14 +37,22 @@ class BacktestEngine:
         portfolio_records = []
         trade_logs = []
         force_exit = False
+        exit_reason = ""
+        risk_exited = False  # 標記是否因為停損/停利離場 (需等待新買訊重置)
 
         for i, row in data.iterrows():
             date = row["ts"]
             close_price = row["close"]
             open_price = row["open"]
-            target_signal = row["position"]
+            raw_signal = row.get("signal", 0)  # 當天未 shift 的指標訊號 (0 或 1)
 
-            # 若上一日觸發停損停利風控，強制於今日開盤價平倉
+            # 當指標訊號歸零 (如均線死亡交叉離場) 時，重置風控鎖定狀態
+            if raw_signal == 0:
+                risk_exited = False
+
+            target_signal = row["position"]  # 前一日 signal 轉移而來的目標部位
+
+            # 1. 處理上一日觸發之風控離場 (STOP_LOSS / TAKE_PROFIT)
             if force_exit and position_shares > 0:
                 sell_shares = position_shares
                 sell_val = sell_shares * open_price
@@ -66,8 +74,12 @@ class BacktestEngine:
                 position_shares = 0
                 entry_price = 0.0
                 force_exit = False
+                risk_exited = True  # 鎖定離場狀態，在舊趨勢結束前禁止再次買入
 
-            current_target_shares = target_signal * self.shares_per_lot
+            # 2. 正常買賣處理
+            # 若處於 risk_exited 鎖定狀態，無視舊趨勢訊號，禁止買進
+            effective_target_signal = 0 if risk_exited else target_signal
+            current_target_shares = effective_target_signal * self.shares_per_lot
             share_diff = current_target_shares - position_shares
 
             if share_diff > 0 and position_shares == 0:
@@ -89,7 +101,7 @@ class BacktestEngine:
 
                     cash -= total_spend
                     position_shares += actual_shares
-                    entry_price = open_price # 紀錄進場均價
+                    entry_price = open_price
                     trade_logs.append({
                         "date": date,
                         "action": "BUY",
@@ -101,7 +113,7 @@ class BacktestEngine:
                         "reason": "SIGNAL"
                     })
             elif share_diff < 0 and position_shares > 0:
-                # 策略訊號賣出 (Sell)
+                # 指標正常平倉賣出 (Sell)
                 sell_shares = position_shares
                 sell_val = sell_shares * open_price
                 comm = max(self.min_commission, sell_val * self.commission_rate * self.discount)
@@ -122,7 +134,7 @@ class BacktestEngine:
                     "reason": "SIGNAL"
                 })
 
-            # 盤後檢視是否觸發停損停利 (僅在已啟用停損/停利且大於0時觸發)
+            # 3. 盤後檢視是否觸發停損停利 (提供下一個交易日開盤離場)
             if position_shares > 0 and entry_price > 0:
                 current_pnl_pct = (close_price - entry_price) / entry_price
                 if self.stop_loss_pct and self.stop_loss_pct > 0 and current_pnl_pct <= -abs(self.stop_loss_pct):
@@ -132,7 +144,7 @@ class BacktestEngine:
                     force_exit = True
                     exit_reason = f"TAKE_PROFIT (+{current_pnl_pct*100:.1f}%)"
 
-            # 計算當日總資產
+            # 4. 紀錄資產
             equity = cash + (position_shares * close_price)
             portfolio_records.append({
                 "ts": date,
@@ -150,7 +162,7 @@ class BacktestEngine:
 
         portfolio_df = pd.DataFrame(portfolio_records)
         
-        # 保留與合併策略產生的指標欄位 (如 sma_short, sma_long, rsi, dif, upper_band, lower_band, k, d 等)
+        # 保留指標欄位
         indicator_cols = [col for col in data.columns if col not in portfolio_df.columns and col not in ["ts", "open", "high", "low", "close", "volume", "position"]]
         for col in indicator_cols:
             portfolio_df[col] = data[col].values
