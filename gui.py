@@ -214,12 +214,26 @@ class BacktestGUI(tk.Tk):
         self.update_idletasks()
 
         try:
-            # 1. 取得數據 (優先查詢本地 DB 快取)
+            # 1. 優先從本地 DB 讀取歷史數據
             cutoff_dt = pd.to_datetime(datetime.now() - timedelta(days=days))
             df_kbars = self.db_cache.load_kbars(code=code)
 
-            # 若本地 DB 無資料或覆蓋天數不夠，向 Shioaji API 增量抓取
-            if df_kbars.empty or df_kbars["ts"].min() > cutoff_dt:
+            # 雙向檢查快取是否充足：
+            # (1) DB 無資料
+            # (2) DB 最早日期未涵蓋回測要求的起始點 (db_min > cutoff_dt)
+            # (3) DB 最新日期落後超過 3 日 (可能有最新交易日需要補抓)
+            needs_api_fetch = False
+            if df_kbars.empty:
+                needs_api_fetch = True
+            else:
+                db_min = df_kbars["ts"].min()
+                db_max = df_kbars["ts"].max()
+                days_behind = (datetime.now() - db_max).days
+                if db_min > cutoff_dt or days_behind > 3:
+                    needs_api_fetch = True
+
+            # 若快取不足才發起 API 請求補抓數據
+            if needs_api_fetch:
                 simulation_env = os.getenv("SIMULATION", "True").lower() == "true"
                 client = ShioajiClient(simulation=simulation_env)
                 if client.login():
