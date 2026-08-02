@@ -1,6 +1,6 @@
 """
 Shioaji API 台股策略回測 GUI 系統
-提供桌面 GUI 介面，支援切換股票代碼、兩階段移動停利 (目標停利達標後啟動高點拉回)、突破前高重新接回、K線/折線圖預覽、交易明細與圖表下載。
+提供桌面 GUI 介面，支援切換股票代碼、兩階段移動停利、突破前高重新接回、K線/折線圖預覽、匯出含策略詳細設定之交易明細 CSV 檔與圖表下載。
 """
 import os
 import tkinter as tk
@@ -37,6 +37,7 @@ class BacktestGUI(tk.Tk):
         # 狀態紀錄
         self.current_fig = None
         self.last_result = None
+        self.last_metrics = None
         self.stock_code = "2330"
 
         # 載入環境變數
@@ -226,9 +227,29 @@ class BacktestGUI(tk.Tk):
         self.canvas_widget = None
 
     def _build_trades_table(self, parent):
-        """建立交易明細表格 Treeview"""
+        """建立交易明細表格 Treeview 與 CSV 匯出按鈕"""
         columns = ("date", "action", "price", "shares", "amount", "fee", "tax", "reason")
         
+        # 上方按鈕欄
+        top_bar = ttk.Frame(parent)
+        top_bar.pack(fill=tk.X, pady=(0, 10))
+
+        self.btn_export_csv = tk.Button(
+            top_bar,
+            text="📥 匯出交易明細與詳細策略設定 (.csv)",
+            font=("Microsoft JhengHei", 10, "bold"),
+            bg="#17a2b8",
+            fg="white",
+            activebackground="#117a8b",
+            activeforeground="white",
+            relief=tk.RAISED,
+            bd=2,
+            state=tk.DISABLED,
+            command=self.export_trades_csv
+        )
+        self.btn_export_csv.pack(side=tk.LEFT)
+
+        # 表格區域
         table_frame = ttk.Frame(parent)
         table_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -366,6 +387,7 @@ class BacktestGUI(tk.Tk):
 
             # 4. 更新績效顯示卡片
             metrics = PerformanceEvaluator.evaluate(result)
+            self.last_metrics = metrics
             ret_val = metrics.get("總報酬率 (%)", "0.00%")
             ret_color = "red" if float(ret_val.replace("%", "")) > 0 else ("green" if float(ret_val.replace("%", "")) < 0 else "black")
             
@@ -385,6 +407,7 @@ class BacktestGUI(tk.Tk):
 
             # 啟用下載按鈕
             self.btn_download.config(state=tk.NORMAL)
+            self.btn_export_csv.config(state=tk.NORMAL)
 
         except Exception as e:
             messagebox.showerror("執行錯誤", f"回測過程發生例外: {e}")
@@ -433,6 +456,81 @@ class BacktestGUI(tk.Tk):
         canvas.draw()
         self.canvas_widget = canvas.get_tk_widget()
         self.canvas_widget.pack(fill=tk.BOTH, expand=True)
+
+    def export_trades_csv(self):
+        """匯出包含詳細測試設定的 CSV 交易明細紀錄檔"""
+        if not self.last_result or self.last_result["trades"].empty:
+            messagebox.showwarning("警告", "目前尚無產生的交易紀錄可供匯出！")
+            return
+
+        default_filename = f"{self.stock_code}_trade_logs_{datetime.now().strftime('%Y%m%d')}.csv"
+        filepath = filedialog.asksaveasfilename(
+            title="匯出交易明細與策略設定 CSV 檔",
+            initialdir=os.path.abspath("output"),
+            initialfile=default_filename,
+            defaultextension=".csv",
+            filetypes=[("CSV 試算表檔", "*.csv"), ("所有檔案", "*.*")]
+        )
+
+        if not filepath:
+            return
+
+        try:
+            trades_df = self.last_result["trades"].copy()
+            metrics = self.last_metrics or {}
+
+            # 建立詳細測試設定 Header Block
+            header_lines = [
+                f"# ========================================================",
+                f"# 永豐金 Shioaji 台股策略歷史回測詳細設定與成果報告",
+                f"# 匯出時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                f"# ========================================================",
+                f"# 股票代號: {self.stock_code}",
+                f"# 回測天數: {self.entry_days.get().strip()} 天",
+                f"# 技術指標策略: {self.combo_strategy.get()}",
+                f"# 主圖類型: {self.combo_chart_type.get()}",
+                f"# 初始資金 (TWD): NT$ {metrics.get('初始資金 (TWD)', '0')}",
+                f"# 現有資產 (TWD): NT$ {metrics.get('期末資產 (TWD)', '0')}",
+                f"# 總報酬率 (%): {metrics.get('總報酬率 (%)', '0.00%')}",
+                f"# 最大回撤 MDD (%): {metrics.get('最大回撤 MDD (%)', '0.00%')}",
+                f"# 夏普比率 (Sharpe): {metrics.get('夏普比率 (Sharpe)', '0.00')}",
+                f"# 交易勝率 (%): {metrics.get('交易勝率 (%)', '0.0%')}",
+                f"# 總交易次數: {metrics.get('總交易次數', 0)} 次",
+                f"# 風控機制啟用: {'是 (True)' if self.var_enable_risk.get() else '否 (False)'}",
+                f"# 硬停損 (%): {self.entry_sl.get().strip()}%",
+                f"# 目標停利 (%): {self.entry_tp.get().strip()}%",
+                f"# 高點拉回 (%): {self.entry_ts.get().strip()}%",
+                f"# 停利後突破前高重新接回: {'是 (True)' if self.var_enable_reentry.get() else '否 (False)'}",
+                f"# ========================================================",
+                f""
+            ]
+
+            # 重新格式化交易表格標頭與數據
+            trades_df.rename(columns={
+                "date": "交易日期",
+                "action": "買賣動作",
+                "price": "成交單價 (TWD)",
+                "shares": "成交股數",
+                "amount": "成交總額 (TWD)",
+                "fee": "手續費 (TWD)",
+                "tax": "證交稅 (TWD)",
+                "reason": "觸發原因"
+            }, inplace=True)
+
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+            # 先寫入帶 BOM 碼之 UTF-8 表頭 (確保 Excel 開啟不亂碼)
+            with open(filepath, "w", encoding="utf-8-sig") as f:
+                for line in header_lines:
+                    f.write(line + "\n")
+
+            # 附加交易數據 DataFrame
+            trades_df.to_csv(filepath, mode="a", index=False, encoding="utf-8-sig")
+
+            messagebox.showinfo("匯出成功", f"交易明細與策略詳細設定已成功匯出至：\n{filepath}")
+
+        except Exception as e:
+            messagebox.showerror("匯出失敗", f"匯出 CSV 檔時發生例外: {e}")
 
     def download_chart(self):
         if not self.current_fig:
