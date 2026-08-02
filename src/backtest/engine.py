@@ -146,6 +146,12 @@ class BacktestEngine:
             })
 
         portfolio_df = pd.DataFrame(portfolio_records)
+        
+        # 保留與合併策略產生的指標欄位 (如 sma_short, sma_long, rsi, dif, upper_band, lower_band, k, d 等)
+        indicator_cols = [col for col in data.columns if col not in portfolio_df.columns and col not in ["ts", "open", "high", "low", "close", "volume", "position"]]
+        for col in indicator_cols:
+            portfolio_df[col] = data[col].values
+
         portfolio_df["daily_return"] = portfolio_df["total_equity"].pct_change().fillna(0)
         portfolio_df["cum_return"] = (portfolio_df["total_equity"] / self.initial_capital) - 1.0
 
