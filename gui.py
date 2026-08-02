@@ -1,6 +1,6 @@
 """
 Shioaji API 台股策略回測 GUI 系統
-提供桌面 GUI 介面，支援切換股票代碼、可選紅漲綠跌 K 線或收盤折線、可勾選是否啟用主動停損停利風控、調整策略參數並下載分析圖表。
+提供桌面 GUI 介面，支援切換股票代碼、K線/折線圖表預覽、交易明細表格 (Trade Logs Table)、風控開關與圖表下載。
 """
 import os
 import tkinter as tk
@@ -31,7 +31,7 @@ class BacktestGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("永豐金 Shioaji 台股策略回測與風控系統 GUI")
-        self.geometry("1280x870")
+        self.geometry("1380x880")
         self.minsize(1024, 750)
 
         # 狀態紀錄
@@ -59,7 +59,7 @@ class BacktestGUI(tk.Tk):
         os._exit(0)
 
     def _build_ui(self):
-        # 主面板劃分：左邊控制欄，右邊圖表呈現欄
+        # 主面板劃分：左邊控制欄，右邊分頁欄 (圖表與交易明細)
         main_paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
         main_paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
@@ -190,14 +190,60 @@ class BacktestGUI(tk.Tk):
         )
         self.btn_download.pack(fill=tk.X, pady=(5, 0))
 
-        # 右側圖表呈現區塊 Frame
-        right_frame = ttk.LabelFrame(main_paned, text=" 回測圖表預覽 (K線/折線與權益曲線) ", padding=10)
-        main_paned.add(right_frame, weight=3)
+        # 右側分頁面板 Notebook Frame
+        right_notebook = ttk.Notebook(main_paned)
+        main_paned.add(right_notebook, weight=3)
 
-        self.chart_container = ttk.Frame(right_frame)
+        # 分頁 1: 回測圖表預覽
+        tab_chart = ttk.Frame(right_notebook, padding=10)
+        right_notebook.add(tab_chart, text=" 📈 回測分析圖表 ")
+
+        self.chart_container = ttk.Frame(tab_chart)
         self.chart_container.pack(fill=tk.BOTH, expand=True)
 
+        # 分頁 2: 交易明細表格 (Trade Logs Table)
+        tab_trades = ttk.Frame(right_notebook, padding=10)
+        right_notebook.add(tab_trades, text=" 📋 交易明細紀錄 ")
+
+        self._build_trades_table(tab_trades)
+
         self.canvas_widget = None
+
+    def _build_trades_table(self, parent):
+        """建立交易明細表格 Treeview"""
+        columns = ("date", "action", "price", "shares", "amount", "fee", "tax", "reason")
+        
+        table_frame = ttk.Frame(parent)
+        table_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.tree_trades = ttk.Treeview(table_frame, columns=columns, show="headings", height=20)
+        
+        # 定義表頭欄位名稱與對齊
+        headers = {
+            "date": "交易日期",
+            "action": "買賣動作",
+            "price": "成交單價 (TWD)",
+            "shares": "成交股數",
+            "amount": "成交總額 (TWD)",
+            "fee": "手續費 (TWD)",
+            "tax": "證交稅 (TWD)",
+            "reason": "觸發原因"
+        }
+
+        for col, text in headers.items():
+            self.tree_trades.heading(col, text=text)
+            self.tree_trades.column(col, anchor=tk.CENTER, width=110)
+
+        # 增加垂直滾動條 (Scrollbar)
+        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.tree_trades.yview)
+        self.tree_trades.configure(yscrollcommand=scrollbar.set)
+
+        self.tree_trades.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # 設定樣式標籤 (BUY 顯示紅色字, SELL 顯示綠色字)
+        self.tree_trades.tag_configure("BUY", foreground="red")
+        self.tree_trades.tag_configure("SELL", foreground="green")
 
     def on_risk_toggle(self):
         """勾選/取消主動停損停利時動態切換輸入框狀態"""
@@ -223,7 +269,6 @@ class BacktestGUI(tk.Tk):
             days = int(self.entry_days.get().strip())
             capital = float(self.entry_capital.get().strip())
             
-            # 是否啟用主動停損停利
             if self.var_enable_risk.get():
                 sl_pct = float(self.entry_sl.get().strip()) / 100.0 if self.entry_sl.get().strip() else None
                 tp_pct = float(self.entry_tp.get().strip()) / 100.0 if self.entry_tp.get().strip() else None
@@ -309,7 +354,10 @@ class BacktestGUI(tk.Tk):
             self.lbl_winrate.config(text=f"交易勝率 (%):  {metrics.get('交易勝率 (%)', '0.0%')}")
             self.lbl_trades.config(text=f"總交易次數:  {metrics.get('總交易次數', 0)}")
 
-            # 5. 繪製圖表並內嵌置 GUI
+            # 5. 填入交易明細表格 (Trade Logs Table)
+            self._update_trades_table(result["trades"])
+
+            # 6. 繪製圖表並內嵌置 GUI
             self._render_chart(result, code)
 
             # 啟用下載按鈕
@@ -319,6 +367,34 @@ class BacktestGUI(tk.Tk):
             messagebox.showerror("執行錯誤", f"回測過程發生例外: {e}")
         finally:
             self.btn_run.config(state=tk.NORMAL, text="🚀 開始執行歷史回測")
+
+    def _update_trades_table(self, trades_df: pd.DataFrame):
+        """刷新並充填交易明細表格"""
+        # 清空舊數據
+        for item in self.tree_trades.get_children():
+            self.tree_trades.delete(item)
+
+        if trades_df.empty:
+            return
+
+        for _, row in trades_df.iterrows():
+            date_str = row["date"].strftime("%Y-%m-%d") if hasattr(row["date"], "strftime") else str(row["date"])
+            action_str = str(row["action"])
+            tag = "BUY" if "BUY" in action_str else "SELL"
+            
+            price_str = f"{row['price']:,.1f}"
+            shares_str = f"{int(row['shares']):,}"
+            amount_str = f"{row['amount']:,.0f}"
+            fee_str = f"{row['fee']:,.1f}"
+            tax_str = f"{row['tax']:,.1f}"
+            reason_str = str(row.get("reason", "SIGNAL"))
+
+            self.tree_trades.insert(
+                "",
+                tk.END,
+                values=(date_str, action_str, price_str, shares_str, amount_str, fee_str, tax_str, reason_str),
+                tags=(tag,)
+            )
 
     def _render_chart(self, result: dict, code: str):
         if self.canvas_widget:
