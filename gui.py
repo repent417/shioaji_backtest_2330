@@ -43,7 +43,20 @@ class BacktestGUI(tk.Tk):
         load_dotenv()
         self.db_cache = LocalDataCache(db_path=os.path.join("data", "kbars_cache.db"))
 
+        # 設定視窗關閉 (點擊 X) 時的處理機制
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
         self._build_ui()
+
+    def on_closing(self):
+        """關閉視窗時清理資源並完全結束 Terminal 進程"""
+        plt.close("all")
+        try:
+            self.quit()
+            self.destroy()
+        except Exception:
+            pass
+        os._exit(0)
 
     def _build_ui(self):
         # 主面板劃分：左邊控制欄，右邊圖表呈現欄
