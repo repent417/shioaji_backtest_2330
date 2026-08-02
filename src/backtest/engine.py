@@ -122,13 +122,13 @@ class BacktestEngine:
                     "reason": "SIGNAL"
                 })
 
-            # 盤後檢視是否觸發停損停利 (提供下一個交易日開盤離場)
+            # 盤後檢視是否觸發停損停利 (僅在已啟用停損/停利且大於0時觸發)
             if position_shares > 0 and entry_price > 0:
                 current_pnl_pct = (close_price - entry_price) / entry_price
-                if self.stop_loss_pct and current_pnl_pct <= -abs(self.stop_loss_pct):
+                if self.stop_loss_pct and self.stop_loss_pct > 0 and current_pnl_pct <= -abs(self.stop_loss_pct):
                     force_exit = True
                     exit_reason = f"STOP_LOSS ({current_pnl_pct*100:.1f}%)"
-                elif self.take_profit_pct and current_pnl_pct >= abs(self.take_profit_pct):
+                elif self.take_profit_pct and self.take_profit_pct > 0 and current_pnl_pct >= abs(self.take_profit_pct):
                     force_exit = True
                     exit_reason = f"TAKE_PROFIT (+{current_pnl_pct*100:.1f}%)"
 

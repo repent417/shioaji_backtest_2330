@@ -1,6 +1,6 @@
 """
 Shioaji API 台股策略回測 GUI 系統
-提供桌面 GUI 介面，支援切換股票代碼、可選紅漲綠跌 K 線或收盤折線、調整策略與風控參數，並可下載分析圖表。
+提供桌面 GUI 介面，支援切換股票代碼、可選紅漲綠跌 K 線或收盤折線、可勾選是否啟用主動停損停利風控、調整策略參數並下載分析圖表。
 """
 import os
 import tkinter as tk
@@ -31,8 +31,8 @@ class BacktestGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("永豐金 Shioaji 台股策略回測與風控系統 GUI")
-        self.geometry("1280x850")
-        self.minsize(1024, 720)
+        self.geometry("1280x870")
+        self.minsize(1024, 750)
 
         # 狀態紀錄
         self.current_fig = None
@@ -110,17 +110,27 @@ class BacktestGUI(tk.Tk):
         self.entry_capital.insert(0, "3000000")
         self.entry_capital.pack(fill=tk.X, pady=(0, 10))
 
-        # 6. 風控參數 (停損 / 停利 %)
-        risk_frame = ttk.Frame(left_frame)
-        risk_frame.pack(fill=tk.X, pady=(0, 15))
+        # 6. 風控選擇 (可勾選是否啟用主動停損停利)
+        self.var_enable_risk = tk.BooleanVar(value=True)
+        self.chk_risk = ttk.Checkbutton(
+            left_frame,
+            text=" 啟用主動停損停利風控",
+            variable=self.var_enable_risk,
+            command=self.on_risk_toggle
+        )
+        self.chk_risk.pack(anchor=tk.W, pady=(0, 5))
 
-        ttk.Label(risk_frame, text="停損 (%):").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
-        self.entry_sl = ttk.Entry(risk_frame, width=8)
+        # 風控數值設定 Frame (停損 / 停利 %)
+        self.risk_frame = ttk.Frame(left_frame)
+        self.risk_frame.pack(fill=tk.X, pady=(0, 15))
+
+        ttk.Label(self.risk_frame, text="停損 (%):").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        self.entry_sl = ttk.Entry(self.risk_frame, width=8)
         self.entry_sl.insert(0, "5.0")
         self.entry_sl.grid(row=0, column=1, padx=(0, 15))
 
-        ttk.Label(risk_frame, text="停利 (%):").grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
-        self.entry_tp = ttk.Entry(risk_frame, width=8)
+        ttk.Label(self.risk_frame, text="停利 (%):").grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
+        self.entry_tp = ttk.Entry(self.risk_frame, width=8)
         self.entry_tp.insert(0, "15.0")
         self.entry_tp.grid(row=0, column=3)
 
@@ -189,6 +199,15 @@ class BacktestGUI(tk.Tk):
 
         self.canvas_widget = None
 
+    def on_risk_toggle(self):
+        """勾選/取消主動停損停利時動態切換輸入框狀態"""
+        if self.var_enable_risk.get():
+            self.entry_sl.config(state=tk.NORMAL)
+            self.entry_tp.config(state=tk.NORMAL)
+        else:
+            self.entry_sl.config(state=tk.DISABLED)
+            self.entry_tp.config(state=tk.DISABLED)
+
     def on_chart_type_changed(self, event=None):
         """當使用者切換主圖類型 (K線 vs 折線) 時即時重繪"""
         if self.last_result:
@@ -203,8 +222,14 @@ class BacktestGUI(tk.Tk):
         try:
             days = int(self.entry_days.get().strip())
             capital = float(self.entry_capital.get().strip())
-            sl_pct = float(self.entry_sl.get().strip()) / 100.0 if self.entry_sl.get().strip() else None
-            tp_pct = float(self.entry_tp.get().strip()) / 100.0 if self.entry_tp.get().strip() else None
+            
+            # 是否啟用主動停損停利
+            if self.var_enable_risk.get():
+                sl_pct = float(self.entry_sl.get().strip()) / 100.0 if self.entry_sl.get().strip() else None
+                tp_pct = float(self.entry_tp.get().strip()) / 100.0 if self.entry_tp.get().strip() else None
+            else:
+                sl_pct = None
+                tp_pct = None
         except ValueError:
             messagebox.showerror("錯誤", "請確認天數、資金與風控數值皆為合法的數字！")
             return
@@ -218,10 +243,6 @@ class BacktestGUI(tk.Tk):
             cutoff_dt = pd.to_datetime(datetime.now() - timedelta(days=days))
             df_kbars = self.db_cache.load_kbars(code=code)
 
-            # 雙向檢查快取是否充足：
-            # (1) DB 無資料
-            # (2) DB 最早日期未涵蓋回測要求的起始點 (db_min > cutoff_dt)
-            # (3) DB 最新日期落後超過 3 日 (可能有最新交易日需要補抓)
             needs_api_fetch = False
             if df_kbars.empty:
                 needs_api_fetch = True
@@ -232,7 +253,6 @@ class BacktestGUI(tk.Tk):
                 if db_min > cutoff_dt or days_behind > 3:
                     needs_api_fetch = True
 
-            # 若快取不足才發起 API 請求補抓數據
             if needs_api_fetch:
                 simulation_env = os.getenv("SIMULATION", "True").lower() == "true"
                 client = ShioajiClient(simulation=simulation_env)
@@ -244,7 +264,6 @@ class BacktestGUI(tk.Tk):
                 else:
                     df_kbars = client._generate_mock_kbars(code=code, days=int(days*0.7))
 
-            # 根據使用者輸入之天數 (days) 進行精確日期區間過濾
             if not df_kbars.empty:
                 df_kbars = df_kbars[df_kbars["ts"] >= cutoff_dt].reset_index(drop=True)
 
