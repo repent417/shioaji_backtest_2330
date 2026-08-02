@@ -5,6 +5,7 @@ Shioaji API 台股策略回測 GUI 系統
 import os
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+from datetime import datetime, timedelta
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
