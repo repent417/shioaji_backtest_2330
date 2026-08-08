@@ -103,6 +103,25 @@ python main_phase2.py
 
 ---
 
+---
+
+## 📚 策略邏輯與風控手冊 (`docs/strategies/`)
+
+專案所有已實作技術指標策略與風控機制的完整邏輯、數學公式與進出場說明均收錄於 [docs/strategies/](docs/strategies/) 資料夾：
+
+- 📘 [策略邏輯手冊總覽](docs/strategies/README.md)
+- 📈 [01. 雙移動平均線交叉策略 (SMA Cross)](docs/strategies/01_sma_cross.md)
+- 🚀 [02. 均線多頭排列策略 (MA Alignment)](docs/strategies/02_ma_alignment.md)
+- 📊 [03. RSI 相對強弱指標策略 (RSI)](docs/strategies/03_rsi.md)
+- 📉 [04. MACD 平滑異同移動平均線策略 (MACD)](docs/strategies/04_macd.md)
+- 🎯 [05. 布林通道策略 (Bollinger Bands)](docs/strategies/05_bollinger_bands.md)
+- 💥 [06. 布林通道擠壓突破策略 (Bollinger Squeeze)](docs/strategies/06_bollinger_squeeze.md)
+- ⚡ [07. KD 隨機指標策略 (KD Stochastic)](docs/strategies/07_kd.md)
+- 🛡️ [08. KD + RSI 雙重驗證策略 (Dual KD+RSI)](docs/strategies/08_dual_kd_rsi.md)
+- 🛡️ [09. 兩階段移動停利與突破前高接回風控 (Risk Controls)](docs/strategies/09_risk_controls.md)
+
+---
+
 ## 策略擴充 (長遠目標)
 
 若要新增客製化策略，只需在 `src/backtest/strategy.py` 繼承 `BaseStrategy` 並實作 `generate_signals` 方法即可：
@@ -118,3 +137,4 @@ class MyCustomStrategy(BaseStrategy):
         data["position"] = data["signal"].shift(1).fillna(0)
         return data
 ```
+
