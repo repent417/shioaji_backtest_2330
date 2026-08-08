@@ -283,7 +283,9 @@ class BacktestGUI(tk.Tk):
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.tree_trades.tag_configure("BUY", foreground="red")
+        self.tree_trades.tag_configure("REENTRY", foreground="#d9534f", font=("Microsoft JhengHei", 9, "bold"))
         self.tree_trades.tag_configure("SELL", foreground="green")
+        self.tree_trades.tag_configure("RISK_SELL", foreground="#6f42c1", font=("Microsoft JhengHei", 9, "bold"))
 
     def on_risk_toggle(self):
         """勾選/取消主動停損停利時動態切換輸入框狀態"""
@@ -437,14 +439,26 @@ class BacktestGUI(tk.Tk):
         for _, row in trades_df.iterrows():
             date_str = row["date"].strftime("%Y-%m-%d") if hasattr(row["date"], "strftime") else str(row["date"])
             action_str = str(row["action"])
-            tag = "BUY" if "BUY" in action_str else "SELL"
+            raw_reason = str(row.get("reason", "SIGNAL"))
+
+            if "RE-ENTRY" in action_str:
+                tag = "REENTRY"
+                reason_str = f"🚩 停利後突破前高接回 ({raw_reason})"
+            elif "BUY" in action_str:
+                tag = "BUY"
+                reason_str = f"📈 指標訊號買進 ({raw_reason})"
+            elif "RISK" in action_str:
+                tag = "RISK_SELL"
+                reason_str = f"🛡️ 主動風控平倉 ({raw_reason})"
+            else:
+                tag = "SELL"
+                reason_str = f"📉 指標訊號賣出 ({raw_reason})"
             
             price_str = f"{row['price']:,.1f}"
             shares_str = f"{int(row['shares']):,}"
             amount_str = f"{row['amount']:,.0f}"
             fee_str = f"{row['fee']:,.1f}"
             tax_str = f"{row['tax']:,.1f}"
-            reason_str = str(row.get("reason", "SIGNAL"))
 
             self.tree_trades.insert(
                 "",

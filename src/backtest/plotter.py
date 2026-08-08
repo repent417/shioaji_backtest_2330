@@ -88,13 +88,19 @@ class BacktestPlotter:
 
         # 標記買賣點 (Buy/Sell Arrow Signals)
         if not trades.empty:
-            buy_trades = trades[trades["action"].str.contains("BUY")]
-            sell_trades = trades[trades["action"].str.contains("SELL")]
+            normal_buy = trades[trades["action"] == "BUY"]
+            reentry_buy = trades[trades["action"].str.contains("RE-ENTRY")]
+            normal_sell = trades[trades["action"] == "SELL"]
+            risk_sell = trades[trades["action"].str.contains("RISK")]
 
-            if not buy_trades.empty:
-                ax1.scatter(buy_trades["date"], buy_trades["price"], marker="^", color="darkred", s=110, label="買進 (BUY)", zorder=6)
-            if not sell_trades.empty:
-                ax1.scatter(sell_trades["date"], sell_trades["price"], marker="v", color="darkgreen", s=110, label="賣出 (SELL)", zorder=6)
+            if not normal_buy.empty:
+                ax1.scatter(normal_buy["date"], normal_buy["price"], marker="^", color="red", s=110, label="指標買進 (BUY)", zorder=6)
+            if not reentry_buy.empty:
+                ax1.scatter(reentry_buy["date"], reentry_buy["price"], marker="^", color="#ff7f0e", s=140, label="突破重接 (RE-ENTRY)", zorder=6)
+            if not normal_sell.empty:
+                ax1.scatter(normal_sell["date"], normal_sell["price"], marker="v", color="green", s=110, label="指標賣出 (SELL)", zorder=6)
+            if not risk_sell.empty:
+                ax1.scatter(risk_sell["date"], risk_sell["price"], marker="v", color="purple", s=130, label="風控平倉 (RISK SELL)", zorder=6)
 
         title_type = "日 K 線 (紅漲綠跌)" if chart_type == "candlestick" else "收盤折線"
         ax1.set_title(f"[{stock_code}] 歷史股價 ({title_type}) 與指標 - {strategy_name}", fontsize=12, fontweight="bold")

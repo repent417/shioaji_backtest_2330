@@ -123,7 +123,7 @@ class BacktestEngine:
                     "amount": buy_cost,
                     "fee": comm,
                     "tax": 0.0,
-                    "reason": f"BREAKOUT ({last_peak_price:.1f})"
+                    "reason": f"BREAKOUT_REENTRY (Peak: {last_peak_price:.1f})"
                 })
 
             # 4. 正常買賣處理
