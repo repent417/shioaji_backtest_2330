@@ -69,7 +69,12 @@ class BacktestPlotter:
             ax1.plot([], [], color="green", label="綠棒 (跌)", linewidth=3)
 
         # 繪製均線 (SMA)
-        if "sma_short" in portfolio.columns and "sma_long" in portfolio.columns:
+        if "sma_5" in portfolio.columns and "sma_10" in portfolio.columns and "sma_20" in portfolio.columns and "sma_60" in portfolio.columns:
+            ax1.plot(portfolio["ts"], portfolio["sma_5"], label="5MA (週線)", color="#e377c2", linestyle="-", linewidth=1.2, zorder=4)
+            ax1.plot(portfolio["ts"], portfolio["sma_10"], label="10MA (雙週)", color="#ff7f0e", linestyle="--", linewidth=1.2, zorder=4)
+            ax1.plot(portfolio["ts"], portfolio["sma_20"], label="20MA (月線)", color="#2ca02c", linestyle="-.", linewidth=1.2, zorder=4)
+            ax1.plot(portfolio["ts"], portfolio["sma_60"], label="60MA (季線)", color="#9467bd", linestyle=":", linewidth=1.5, zorder=4)
+        elif "sma_short" in portfolio.columns and "sma_long" in portfolio.columns:
             ax1.plot(portfolio["ts"], portfolio["sma_short"], label="快線 (Short MA)", color="#ff7f0e", linestyle="--", linewidth=1.3, zorder=4)
             ax1.plot(portfolio["ts"], portfolio["sma_long"], label="慢線 (Long MA)", color="#9467bd", linestyle="--", linewidth=1.3, zorder=4)
         elif "sma" in portfolio.columns:
@@ -99,7 +104,14 @@ class BacktestPlotter:
 
         # 2. 中圖 (若有 RSI / MACD / KD 指標)
         if ax_ind is not None:
-            if "rsi" in portfolio.columns:
+            if "rsi" in portfolio.columns and "k" in portfolio.columns:
+                ax_ind.plot(portfolio["ts"], portfolio["k"], label="K 線", color="#1f77b4", linewidth=1.2)
+                ax_ind.plot(portfolio["ts"], portfolio["d"], label="D 線", color="#ff7f0e", linewidth=1.2)
+                ax_ind.plot(portfolio["ts"], portfolio["rsi"], label="RSI(14)", color="#8c564b", linestyle="--", linewidth=1.3)
+                ax_ind.axhline(50, color="gray", linestyle=":", alpha=0.7, label="RSI強勢線 (50)")
+                ax_ind.set_ylabel("KD / RSI 數值", fontsize=10)
+                ax_ind.set_ylim(0, 100)
+            elif "rsi" in portfolio.columns:
                 ax_ind.plot(portfolio["ts"], portfolio["rsi"], label="RSI(14)", color="#8c564b", linewidth=1.3)
                 ax_ind.axhline(70, color="red", linestyle="--", alpha=0.6, label="超買線 (70)")
                 ax_ind.axhline(30, color="green", linestyle="--", alpha=0.6, label="超賣線 (30)")

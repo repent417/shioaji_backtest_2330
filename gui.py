@@ -16,10 +16,13 @@ from src.client import ShioajiClient
 from src.data import LocalDataCache
 from src.backtest import (
     SMACrossStrategy,
+    MAAlignmentStrategy,
     RSIStrategy,
     MACDStrategy,
     BollingerBandsStrategy,
+    BollingerSqueezeStrategy,
     KDStrategy,
+    DualKDRSIStrategy,
     BacktestEngine,
     PerformanceEvaluator
 )
@@ -84,12 +87,15 @@ class BacktestGUI(tk.Tk):
         ttk.Label(left_frame, text="選擇技術指標策略:", font=("Microsoft JhengHei", 10, "bold")).pack(anchor=tk.W, pady=(0, 2))
         self.combo_strategy = ttk.Combobox(left_frame, state="readonly", font=("Microsoft JhengHei", 10))
         self.combo_strategy["values"] = [
+            "均線多頭排列 (5/10/20/60MA) [飆股主升段]",
             "SMA Cross (10/60) [最佳化推薦]",
             "SMA Cross (5/10) [短期均線]",
             "RSI Strategy (14, 35/65) [低風險]",
             "MACD Strategy (12/26/9)",
             "Bollinger Bands (20, 2.0std)",
-            "KD Strategy (9)"
+            "布林通道擠壓突破 (Bollinger Squeeze)",
+            "KD Strategy (9)",
+            "KD + RSI 雙重驗證策略 [降低假訊號]"
         ]
         self.combo_strategy.current(0)
         self.combo_strategy.pack(fill=tk.X, pady=(0, 10))
@@ -361,16 +367,22 @@ class BacktestGUI(tk.Tk):
 
             # 2. 實例化策略
             strat_name = self.combo_strategy.get()
-            if "10/60" in strat_name:
+            if "均線多頭排列" in strat_name:
+                strategy = MAAlignmentStrategy()
+            elif "10/60" in strat_name:
                 strategy = SMACrossStrategy(short_window=10, long_window=60)
             elif "5/10" in strat_name:
                 strategy = SMACrossStrategy(short_window=5, long_window=10)
-            elif "RSI" in strat_name:
+            elif "RSI" in strat_name and "KD" not in strat_name:
                 strategy = RSIStrategy(period=14, oversold=35, overbought=65)
             elif "MACD" in strat_name:
                 strategy = MACDStrategy(fast_period=12, slow_period=26, signal_period=9)
+            elif "擠壓突破" in strat_name:
+                strategy = BollingerSqueezeStrategy(period=20, std_dev=2.0)
             elif "Bollinger" in strat_name:
                 strategy = BollingerBandsStrategy(period=20, std_dev=2.0)
+            elif "KD + RSI" in strat_name:
+                strategy = DualKDRSIStrategy(kd_period=9, rsi_period=14)
             else:
                 strategy = KDStrategy(period=9)
 

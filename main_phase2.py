@@ -9,10 +9,13 @@ from src.client import ShioajiClient
 from src.data import LocalDataCache
 from src.backtest import (
     SMACrossStrategy,
+    MAAlignmentStrategy,
     RSIStrategy,
     MACDStrategy,
     BollingerBandsStrategy,
+    BollingerSqueezeStrategy,
     KDStrategy,
+    DualKDRSIStrategy,
     BacktestEngine,
     PerformanceEvaluator
 )
@@ -48,14 +51,17 @@ def main():
     print(f"資料筆數：{len(df_kbars)} 筆 | 日期範圍：{df_kbars['ts'].dt.strftime('%Y-%m-%d').iloc[0]} ~ {df_kbars['ts'].dt.strftime('%Y-%m-%d').iloc[-1]}")
     print("-" * 65)
 
-    # 2. 多技術指標策略比較 (SMA, RSI, MACD, Bollinger Bands, KD)
+    # 2. 多技術指標策略比較 (含均線多頭排列、布林擠壓突破、Dual KD+RSI)
     print(f"\n[步驟 2/5] 執行多指標策略歷史績效大比拼...")
     strategies = [
+        MAAlignmentStrategy(),
         SMACrossStrategy(short_window=5, long_window=10),
         RSIStrategy(period=14, oversold=35, overbought=65),
         MACDStrategy(fast_period=12, slow_period=26, signal_period=9),
         BollingerBandsStrategy(period=20, std_dev=2.0),
-        KDStrategy(period=9)
+        BollingerSqueezeStrategy(period=20, std_dev=2.0),
+        KDStrategy(period=9),
+        DualKDRSIStrategy(kd_period=9, rsi_period=14)
     ]
 
     engine = BacktestEngine(initial_capital=3_000_000.0)
